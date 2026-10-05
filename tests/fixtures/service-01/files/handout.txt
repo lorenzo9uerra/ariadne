@@ -1,0 +1,1 @@
+Opaque public handout for the service-package wiring fixture.

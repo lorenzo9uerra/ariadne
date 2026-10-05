@@ -1,0 +1,22 @@
+# Local configuration and credentials
+.env
+.env.*
+/infra/ansible/inventory.ini
+
+# Python environments and generated caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ty_cache/
+
+# Local evaluation logs, audits and spending ledger
+/logs/
+/jobs/
+
+# Corresponding GNU libc source staged for a public release, not Git history
+/tasks/pwn-01/private/glibc-source/
+
+# Operating-system metadata
+.DS_Store

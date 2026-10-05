@@ -1,0 +1,12 @@
+services:
+    scanfun:
+        container_name: scanfun-f5475c3763a91eeb478793d289c59fbb
+        privileged: true # needed for redpwn jail to work
+        build:
+            dockerfile: ./deploy/Dockerfile
+            context: ../
+        logging:
+            driver: "json-file"
+        restart: always # please keep this in
+        expose: # This should be the port your challenge runs on inside the container.
+            - "4010"

@@ -1,0 +1,4 @@
+The player binary in this package is generated from `private/original/what.c`
+from b01lers CTF 2025 under the MIT License in `LICENSE`. The upstream source,
+upstream solution and event metadata are retained privately for provenance and
+are not part of the player handout.

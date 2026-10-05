@@ -1,0 +1,12 @@
+# Initial supported target. Changing it also requires selecting matching packages.
+ubuntu_release: "26.04"
+uv_version: "0.12.22"
+
+# Selected from the VM's stable Docker APT index on 2026-10-02.
+# Keep the complete version strings when updating these pins.
+docker_package_versions:
+  docker-ce: "5:29.8.2-1~ubuntu.26.04~resolute"
+  docker-ce-cli: "5:29.8.2-1~ubuntu.26.04~resolute"
+  containerd.io: "2.3.6-1~ubuntu.26.04~resolute"
+  docker-buildx-plugin: "0.37.1-1~ubuntu.26.04~resolute"
+  docker-compose-plugin: "5.6.0-1~ubuntu.26.04~resolute"

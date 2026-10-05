@@ -1,0 +1,3 @@
+# Preserve byte-identical challenge artifacts and provenance hashes.
+tasks/** -text
+tests/fixtures/** -text

@@ -1,0 +1,3 @@
+log_dir = "logs"
+spend_ledger = "logs/spending.sqlite3"
+benchmark_config = "benchmark/draft.toml"

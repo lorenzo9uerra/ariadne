@@ -1,0 +1,31 @@
+services:
+  default:
+    # Built once per Docker host by sandbox/docker_host.py from sandbox/Dockerfile,
+    # and named by a hash of every build input, so it is reused until an input
+    # changes. There is no build section: the shared image is reused without rebuilding.
+    image: ariadne-sandbox:${SANDBOX_IMAGE_TAG:?set by the runner from the image inputs}
+    platform: ${SANDBOX_PLATFORM:-linux/arm64}
+    init: true
+    hostname: workspace
+    command: ["sleep", "infinity"]
+    stop_grace_period: 1s
+    user: "1000:1000"
+    working_dir: /workspace
+    network_mode: none
+    read_only: true
+    privileged: false
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    cpus: 1.0
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 128
+    ulimits:
+      core: 0
+      nofile:
+        soft: 1024
+        hard: 1024
+    tmpfs:
+      - /workspace:rw,exec,nosuid,nodev,size=268435456,uid=1000,gid=1000,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=67108864,mode=1777

@@ -1,0 +1,10 @@
+# Explicit fast, unpaid environment check. Supply a task with --path.
+# nop submits nothing, so zero scores are expected.
+n_concurrent_trials: 1
+n_attempts: 1
+retry:
+  max_retries: 0
+environment:
+  import_path: sandbox.environment:AriadneDockerEnvironment
+agents:
+  - name: nop

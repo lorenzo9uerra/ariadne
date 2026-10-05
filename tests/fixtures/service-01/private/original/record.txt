@@ -1,0 +1,1 @@
+Synthetic fixture authored for this repository; no upstream source.
