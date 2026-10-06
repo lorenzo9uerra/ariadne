@@ -214,8 +214,7 @@ containers stay offline.
 ### Run a model
 
 Put `OPENROUTER_API_KEY` and `TAVILY_API_KEY` in a local `.env` file, using a
-dedicated OpenRouter key with a lifetime spending cap of at most $10 and no
-automatic reset. The model, route, prices and limits come from
+dedicated OpenRouter key with the spending limit you choose. The model, route, prices and limits come from
 `benchmark/draft.toml`, and the agent checks them before its first request.
 
 ```sh
