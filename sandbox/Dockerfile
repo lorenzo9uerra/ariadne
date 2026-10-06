@@ -3,13 +3,18 @@ FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2
 
 COPY tool-versions.env /etc/ariadne-tools.env
 RUN . /etc/ariadne-tools.env \
+    && case "$(dpkg --print-architecture)" in \
+        amd64) platform_packages="$SYSTEM_PACKAGES_AMD64" ;; \
+        arm64) platform_packages="$SYSTEM_PACKAGES_ARM64" ;; \
+        *) exit 1 ;; \
+    esac \
     # Plain HTTP needs no CA certificates in the minimal base; apt still verifies
     # every package against Debian's archive signing keys.
     && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
     && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ bookworm main\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ bookworm-updates main\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ bookworm-security main\n' \
         "$DEBIAN_SNAPSHOT" "$DEBIAN_SNAPSHOT" "$DEBIAN_SNAPSHOT" > /etc/apt/sources.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends $SYSTEM_PACKAGES \
+    && apt-get install -y --no-install-recommends $SYSTEM_PACKAGES $platform_packages \
     && dpkg-query -W > /opt/system-packages.txt \
     && rm -rf /var/lib/apt/lists/*
 

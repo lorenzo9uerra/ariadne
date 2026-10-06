@@ -123,6 +123,8 @@ def test_analysis_tools_through_docker(tmp_path):
     from tests.support import SAFE, assert_isolation_and_cleanup, export_task, run_trial
 
     platform = select_platform("any")
+    has_ltrace = platform == "linux/amd64"
+    ltrace = "ltrace" if has_ltrace else ""
     source = tmp_path / "probe.c"
     source.write_text(
         "#include <stdio.h>\n"
@@ -143,7 +145,8 @@ def test_analysis_tools_through_docker(tmp_path):
     )
     task = export_task(package, tmp_path / "task", ensure_image(platform), platform)
     commands = [
-        "set -e; command -v base64 sha256sum grep sed awk find tar file strings readelf objdump nm xxd gcc make python gdb strace ltrace patchelf jq rg nc zip unzip decompile; python --version",
+        "set -e; command -v base64 sha256sum grep sed awk find tar file strings readelf objdump nm xxd gcc make python gdb strace "
+        f"{ltrace} patchelf jq rg nc zip unzip decompile; python --version",
         "gcc -g -O0 -o /workspace/probe /workspace/probe.c && /workspace/probe",
         "readelf -s /workspace/probe",
         "python -c "
@@ -161,7 +164,11 @@ def test_analysis_tools_through_docker(tmp_path):
             "print('Z3 and requests passed')"
         ),
         "strace -o /workspace/syscalls.trace /workspace/probe && grep -F 'write(' /workspace/syscalls.trace",
-        "ltrace -o /workspace/library.trace /workspace/probe && grep -F 'puts(' /workspace/library.trace",
+        (
+            "ltrace -o /workspace/library.trace /workspace/probe && grep -F 'puts(' /workspace/library.trace"
+            if has_ltrace
+            else "if command -v ltrace >/dev/null 2>&1; then exit 1; fi; printf 'ltrace unavailable on ARM64\\n'"
+        ),
         "cp /workspace/probe /workspace/probe-copy && patchelf --set-rpath /workspace /workspace/probe-copy "
         '&& test "$(patchelf --print-rpath /workspace/probe-copy)" = /workspace '
         "&& /workspace/probe-copy && printf 'patchelf passed\\n'",
@@ -189,7 +196,7 @@ def test_analysis_tools_through_docker(tmp_path):
             "identity",
             "Z3 and requests passed",
             "write(",
-            "puts(",
+            "puts(" if has_ltrace else "ltrace unavailable on ARM64",
             "patchelf passed",
             "true",
             "2:beta",
