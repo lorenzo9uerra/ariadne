@@ -313,12 +313,13 @@ frozen plan (tasks, settings, order, seed)
                                        derived summary; originals untouched
 ```
 
-The directory `jobs/experiment-.../jobs/` contains native Harbor jobs. Open it
-with `uv run harbor view jobs/EXPERIMENT/jobs` to see the agent and model in the
-job list, then select a trial's Rollout. The experiment's sibling `private/`
-directory holds the frozen plan and append-only review journal; `summary.json`
-holds derived scores, attribution, replacement links and accounting. Older
-experiments keep their original paths and open at `jobs/EXPERIMENT` instead.
+Native Harbor jobs live directly under `jobs/`, with unique names identifying
+the model, task and condition. Open them with `uv run harbor view jobs`, then
+select a trial's Rollout. Experiment records live under `logs/experiments/`:
+`private/` holds the frozen plan and append-only review journal, while
+`summary.json` holds derived scores, attribution, replacement links and
+accounting. With `--jobs-dir`, the accompanying `logs/experiments/` directory
+is created alongside the selected jobs directory.
 
 `benchmark/autoreview.py` reads and hashes each trial's records, checks their
 consistency, and asks a triage model to inspect the transcript. A separate
@@ -335,7 +336,7 @@ reviews prevent a complete condition score. Native rewards are never rewritten.
 For a reviewed, replaceable failure, run a new trial in the same slot:
 
 ```sh
-uv run python -m benchmark.experiment replace jobs/EXPERIMENT --job TASK_ID-offline --slot 1
+uv run python -m benchmark.experiment replace logs/experiments/EXPERIMENT --job TASK_ID-offline --slot 1
 ```
 
 An implementation-fault replacement also requires a reviewed fix recorded

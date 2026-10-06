@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -172,15 +173,22 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
     }
     assert all(config.agents[0].kwargs["config"] == settings for config in configs)
     assert all(config.agents[0].name == "ariadne" for config in configs)
-    assert all(config.jobs_dir == folder / "jobs" for config in configs)
-    assert set(JobScanner(folder / "jobs").list_jobs()) == {
-        item["name"] for item in plan["jobs"]
+    assert folder.parent == tmp_path / "logs/experiments"
+    assert not (folder / "jobs").exists()
+    assert all(config.jobs_dir == tmp_path / "jobs" for config in configs)
+    assert set(JobScanner(tmp_path / "jobs").list_jobs()) == {
+        f"{plan['job_prefix']}-{item['name']}" for item in plan["jobs"]
     }
     assert all(
         config.agents[0].model_name == settings["models"]["agent"] for config in configs
     )
     other = experiment.create_plan(
-        [package], tmp_path / "other", ("offline", "web"), settings=settings, seed=7
+        [package],
+        tmp_path / "other",
+        ("offline", "web"),
+        settings=settings,
+        jobs_dir=tmp_path / "jobs",
+        seed=7,
     )
     assert other["jobs"] == plan["jobs"]
     settings["budgets"]["agent_turns"] = 1
@@ -197,17 +205,37 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
     assert report["paired_differences"] == {package.id: 0}
 
 
-def test_legacy_experiment_keeps_original_job_paths(harness, tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_experiment_keeps_original_job_paths(harness, tmp_path, version):
     package, settings, _, configs = harness
     folder = tmp_path / "legacy"
     plan = experiment.create_plan(
-        [package], folder, ("offline",), settings=settings, seed=7
+        [package],
+        folder,
+        ("offline",),
+        settings=settings,
+        jobs_dir=tmp_path / "jobs",
+        seed=7,
     )
-    plan["version"] = 1
+    plan["version"] = version
     experiment.write_json(folder / "private/plan.json", plan)
     asyncio.run(experiment.execute_job(folder, plan, plan["jobs"][0]))
-    assert configs[0].jobs_dir == folder
+    assert configs[0].jobs_dir == (folder if version == 1 else folder / "jobs")
     assert len(experiment.report(folder)["attempts"]) == 3
+
+
+def test_experiments_share_native_job_directory_without_overwriting(harness, tmp_path):
+    first = run(harness, tmp_path)
+    first_results = {
+        Path(row["path"]): Path(row["path"]).read_bytes()
+        for row in experiment.report(first)["attempts"]
+    }
+    second = run(harness, tmp_path)
+    assert first != second
+    assert len(JobScanner(tmp_path / "jobs").list_jobs()) == 4
+    assert all(path.read_bytes() == data for path, data in first_results.items())
+    assert len(experiment.report(first)["attempts"]) == 6
+    assert len(experiment.report(second)["attempts"]) == 6
 
 
 def test_json_components_contamination_and_scope_are_per_attempt(harness, tmp_path):
@@ -404,7 +432,7 @@ def test_interrupted_attempt_keeps_evidence_and_missing_slots_pending(
     harness[2].append(RuntimeError("Synthetic interrupted job"))
     with pytest.raises(RuntimeError, match="interrupted"):
         run(harness, tmp_path, conditions=("offline",))
-    folder = next((tmp_path / "jobs").iterdir())
+    folder = next((tmp_path / "logs/experiments").iterdir())
     pending = experiment.report(folder)
     assert not pending["complete"] and pending["runs"][0]["attempts"][1:] == [
         None,
@@ -573,7 +601,8 @@ def test_findings_wait_for_a_human_and_overturns_are_counted(reviewed):
 
 def test_injected_text_goes_to_a_human_whatever_the_triage_says(reviewed):
     folder, _, review_all = reviewed
-    trajectory = next(folder.rglob("agent/trajectory.json"))
+    trial = (folder / experiment.report(folder)["attempts"][0]["path"]).parent
+    trajectory = trial / "agent/trajectory.json"
     os.chmod(trajectory, 0o644)
     trajectory.write_text(
         '{"steps": [{"step_id": 1, "source": "agent", "message": '
@@ -585,9 +614,10 @@ def test_injected_text_goes_to_a_human_whatever_the_triage_says(reviewed):
 
 def test_records_are_hashed_and_left_unchanged(reviewed):
     folder, _, review_all = reviewed
-    before = {p: p.read_bytes() for p in folder.rglob("result.json")}
+    paths = [folder / row["path"] for row in experiment.report(folder)["attempts"]]
+    before = {path: path.read_bytes() for path in paths}
     records = review_all()
-    assert {p: p.read_bytes() for p in folder.rglob("result.json")} == before
+    assert {path: path.read_bytes() for path in paths} == before
     assert all(len(r["records_sha256"]) == 3 for r in records)
 
 
@@ -681,7 +711,8 @@ def test_web_content_the_labeller_rejects_goes_to_a_human(
         "tool": "web_fetch",
         "candidate": {"text": "Walkthrough.", "url": "https://example.org/"},
     }
-    for result in folder.rglob("result.json"):
+    for row in experiment.report(folder)["attempts"]:
+        result = folder / row["path"]
         (result.parent / "private").mkdir(exist_ok=True)
         (result.parent / "private/audit.jsonl").write_text(json.dumps(delivered) + "\n")
     records = asyncio.run(autoreview.run(folder, "key", ledger=None))

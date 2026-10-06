@@ -242,21 +242,19 @@ uv run python -m benchmark.runner --challenge rev-01 --live \
 ```
 
 Each command runs an experiment with three independent attempts in each
-condition, in a randomized condition order, all three even after a solve. Its directory under
-`jobs/` holds the frozen settings and input hashes, the native Harbor jobs and
-a `summary.json` that stays pending until every attempt is reviewed. Pass
+condition, in a randomized condition order, all three even after a solve.
+Native Harbor jobs go directly under `jobs/`, with names identifying the model,
+task and condition. Frozen settings, input hashes and review records are kept
+under `logs/experiments/`; each experiment's `summary.json` stays pending until
+every attempt is reviewed. Pass
 several task names to include them in one experiment. Omitting `--model` uses
 the configured baseline.
 
-Open the experiment's native jobs in Harbor View:
+Open all jobs in Harbor View:
 
 ```sh
-uv run harbor view jobs/EXPERIMENT/jobs
+uv run harbor view jobs
 ```
-
-The `jobs/` subdirectory contains only Harbor jobs, keeping the experiment's
-review records out of the job list. Experiments created before this layout
-change open with `uv run harbor view jobs/EXPERIMENT`.
 
 For a quick check, `--dev` runs a single trial, offline unless you add
 `--condition web`:
@@ -284,7 +282,7 @@ using deterministic checks and a triage model on read-only records, costing a fe
 cents per experiment:
 
 ```sh
-uv run python -m benchmark.experiment autoreview jobs/EXPERIMENT
+uv run python -m benchmark.experiment autoreview logs/experiments/EXPERIMENT
 ```
 
 The report then lists the attempts that need you: those with a finding, plus a
@@ -294,7 +292,7 @@ automation is wrong. Review them with the
 replaces the automatic one:
 
 ```sh
-uv run python -m benchmark.experiment review jobs/EXPERIMENT ATTEMPT_UUID \
+uv run python -m benchmark.experiment review logs/experiments/EXPERIMENT ATTEMPT_UUID \
   --disposition counted --reviewer YOUR_NAME --evidence 'path/to/notes'
 ```
 
@@ -355,8 +353,8 @@ Each trial keeps Harbor's trajectory of model responses, tool calls and
 results, the verifier's result and the isolation evidence. The host also keeps
 a private audit of every web request, reviewer decision and spending record.
 Harbor View's Rollout tab displays the model's messages, reasoning when the
-provider returns it, tool calls and results. For experiments, open the `jobs/`
-subdirectory as shown above; `uv run harbor view jobs` opens development jobs.
+provider returns it, tool calls and results. `uv run harbor view jobs` opens both
+benchmark and development jobs in one list.
 
 ## Limits and isolation
 

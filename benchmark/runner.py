@@ -152,7 +152,7 @@ def main() -> None:
         "--log-dir",
         type=Path,
         default=ROOT / "jobs",
-        help="Where Harbor jobs and experiments are written (default: jobs/)",
+        help="Where native Harbor jobs are written (default: jobs/)",
     )
     args = parser.parse_args()
     if args.model is not None and not args.live:
@@ -185,7 +185,7 @@ def main() -> None:
             )
         )
         print(f"Harbor experiment: {folder}")
-        print(f"View rollouts: uv run harbor view {folder / 'jobs'}")
+        print(f"View rollouts: uv run harbor view {args.jobs_dir}")
         print(
             "Outcomes await independent review; see summary.json and the retained trials."
         )

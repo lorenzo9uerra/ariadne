@@ -177,6 +177,7 @@ def create_plan(
     conditions: tuple[str, ...],
     *,
     settings: dict,
+    jobs_dir: Path,
     dev=False,
     seed=None,
 ) -> dict:
@@ -214,7 +215,9 @@ def create_plan(
                 }
             )
     plan = {
-        "version": 2,
+        "version": 3,
+        "jobs_dir": str(jobs_dir.resolve()),
+        "job_prefix": f"{folder.name.removeprefix('experiment-')}-{settings['models']['agent'].rsplit('/', 1)[-1]}",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "development": dev,
         "seed": generator_seed,
@@ -225,7 +228,6 @@ def create_plan(
     }
     folder.mkdir(parents=True, exist_ok=False)
     (folder / "private").mkdir()
-    (folder / "jobs").mkdir()
     with (folder / "private/plan.json").open("x") as output:
         json.dump(plan, output, indent=2, allow_nan=False)
         output.write("\n")
@@ -270,6 +272,8 @@ async def execute_job(
         if slot is None
         else f"{item['name']}-replacement-{uuid4().hex[:8]}"
     )
+    if plan["version"] >= 3:
+        name = f"{plan['job_prefix']}-{name}"
     if agent is None:
         agent = {
             "name": "ariadne",
@@ -279,7 +283,11 @@ async def execute_job(
         }
     config = job_config(
         Path(item["task"]),
-        folder / "jobs" if plan["version"] >= 2 else folder,
+        Path(plan["jobs_dir"])
+        if plan["version"] >= 3
+        else folder / "jobs"
+        if plan["version"] == 2
+        else folder,
         agent,
         dev=plan["development"],
         settings=plan["settings"],
@@ -306,6 +314,7 @@ async def execute_job(
         assigned = slot if slot is not None else next_slot
         if next_slot > config.n_attempts:
             raise ValueError("Native job exceeded the planned attempt count")
+        result = event.config.trials_dir / event.trial_name / "result.json"
         with journal(folder) as (_, append):
             append(
                 "attempt",
@@ -314,9 +323,9 @@ async def execute_job(
                 planned_job=item["name"],
                 slot=assigned,
                 path=str(
-                    (
-                        event.config.trials_dir / event.trial_name / "result.json"
-                    ).relative_to(folder)
+                    result.resolve()
+                    if plan["version"] >= 3
+                    else result.relative_to(folder)
                 ),
                 replaces=replaces,
             )
@@ -354,9 +363,20 @@ async def run_experiment(
 ) -> Path:
     settings = copy.deepcopy(settings or load_draft())
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S")
-    folder = jobs_dir.resolve() / f"experiment-{stamp}-{uuid4().hex[:8]}"
+    folder = (
+        jobs_dir.resolve().parent
+        / "logs/experiments"
+        / f"experiment-{stamp}-{uuid4().hex[:8]}"
+    )
+    folder.parent.mkdir(parents=True, exist_ok=True)
     plan = create_plan(
-        packages, folder, conditions, settings=settings, dev=dev, seed=seed
+        packages,
+        folder,
+        conditions,
+        settings=settings,
+        jobs_dir=jobs_dir,
+        dev=dev,
+        seed=seed,
     )
     try:
         for item in plan["jobs"]:
