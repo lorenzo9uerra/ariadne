@@ -3,7 +3,11 @@
 import asyncio
 import copy
 import json
+import math
+import re
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 import tiktoken
@@ -14,6 +18,7 @@ from benchmark.costs import (
     CostAccountingError,
     Ledger,
     Prices,
+    amount,
     billed_response,
     preflight,
     routing,
@@ -26,6 +31,80 @@ class ContextLimit(RuntimeError):
 
 class ModelAPIError(RuntimeError):
     pass
+
+
+def retry_after(value: str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+        if seconds < 0:
+            return None
+    except ValueError:
+        try:
+            seconds = (
+                parsedate_to_datetime(value) - datetime.now(timezone.utc)
+            ).total_seconds()
+        except (ValueError, TypeError, OverflowError):
+            return None
+    return max(0, seconds) if math.isfinite(seconds) else None
+
+
+def error_details(response: httpx.Response, api_key: str) -> dict:
+    """Keep diagnostic fields and correlation IDs, without credentials."""
+
+    def clean(value):
+        text = str(value).replace(api_key, "[redacted]") if api_key else str(value)
+        text = re.sub(r"\b(?:sk-or-v1-|sk-|tvly-)[\w-]+", "[redacted]", text)
+        text = re.sub(r"(?i)Bearer\s+\S+", "Bearer [redacted]", text)
+        return text[:2048]
+
+    try:
+        data = response.json() if len(response.content) <= 16384 else {}
+    except ValueError:
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    error = data.get("error", {})
+    error = error if isinstance(error, dict) else {}
+    metadata = error.get("metadata", {})
+    metadata = metadata if isinstance(metadata, dict) else {}
+    details: dict = {
+        "api_error": {
+            k: clean(v)
+            for k, v in {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                **{
+                    k: metadata.get(k)
+                    for k in (
+                        "provider_name",
+                        "provider_code",
+                        "error_type",
+                        "raw",
+                        "limit_source",
+                        "reason",
+                        "remedy_hint",
+                    )
+                },
+            }.items()
+            if v is not None
+        }
+    }
+    identifiers = [response.headers.get("X-Generation-Id"), data.get("id")]
+    identifiers = [
+        v
+        for v in identifiers
+        if isinstance(v, str) and re.fullmatch(r"gen-[\w-]{1,240}", v)
+    ]
+    if identifiers and len(set(identifiers)) == 1:
+        details["generation_id"] = identifiers[0]
+    request_id = response.headers.get("X-Request-Id")
+    if request_id:
+        details["provider_request_id"] = clean(request_id)
+    delay = retry_after(response.headers.get("Retry-After"))
+    if delay is not None:
+        details["retry_after_seconds"] = delay
+    return details
 
 
 def input_tokens(
@@ -87,6 +166,70 @@ class OpenRouterModel:
     async def check_route(self) -> None:
         self.prices = await asyncio.to_thread(preflight, self.config, self.api_key)
         self.ready = True
+
+    async def reconcile_error(
+        self, client: httpx.AsyncClient, entry: dict, deadline: float
+    ) -> None:
+        generation_id = entry.get("generation_id")
+        remaining = deadline - time.monotonic()
+        if not generation_id or remaining <= 0:
+            return
+        entry["billing_status"] = "unconfirmed"
+        timeout = min(remaining, self.config["live"]["preflight_timeout_seconds"])
+        try:
+            response = await asyncio.wait_for(
+                client.get(
+                    API_URL + "/generation",
+                    params={"id": generation_id},
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    timeout=timeout,
+                ),
+                timeout,
+            )
+            if not response.is_success or len(response.content) > 16384:
+                return
+            data = response.json().get("data")
+            if (
+                not isinstance(data, dict)
+                or data.get("id") != generation_id
+                or data.get("model")
+                != self.config["models"]["agent"].removeprefix("openrouter/")
+                or data.get("is_byok") is not False
+                or not isinstance(data.get("finish_reason"), str)
+                or not data["finish_reason"]
+            ):
+                return
+            charge = amount(data.get("total_cost"))
+            if data.get("provider_name") != self.config["live"][
+                "provider_name"
+            ] and not (data.get("provider_name") is None and charge == 0):
+                return
+        except (
+            httpx.TransportError,
+            TimeoutError,
+            ValueError,
+            AttributeError,
+            CostAccountingError,
+        ):
+            return
+        self.ledger.settle(entry["call_id"], charge, generation_id)
+        entry.update(
+            billing_status="confirmed",
+            billed_usd=str(charge),
+            billing_record={
+                key: data[key]
+                for key in (
+                    "id",
+                    "model",
+                    "provider_name",
+                    "is_byok",
+                    "finish_reason",
+                    "total_cost",
+                )
+                if key in data
+            },
+        )
+        self.audit.publish(entry)
 
     async def generate(
         self, messages: list[dict], tools: list[dict], deadline: float
@@ -156,8 +299,12 @@ class OpenRouterModel:
                             or response.status_code >= 500
                         )
                         entry.update(
-                            status="http_error", http_status=response.status_code
+                            status="http_error",
+                            http_status=response.status_code,
+                            **error_details(response, self.api_key),
                         )
+                        self.audit.publish(entry)
+                        await self.reconcile_error(client, entry, deadline)
                         raise ModelAPIError("Model API request failed")
                     data = response.json()
                     entry.update(status="received", response=data)
@@ -189,9 +336,11 @@ class OpenRouterModel:
                         "usage": usage,
                         "cost_usd": float(charge),
                     }
-                except (httpx.TransportError, TimeoutError):
+                except (httpx.TransportError, TimeoutError) as error:
                     retryable = True
-                    entry.update(status="transport_error")
+                    entry.update(
+                        status="transport_error", error_type=type(error).__name__
+                    )
                 except ModelAPIError:
                     if not retryable:
                         raise
@@ -209,6 +358,9 @@ class OpenRouterModel:
                     self.config["live"]["retry_initial_seconds"] * 2**attempt,
                     self.config["live"]["retry_max_seconds"],
                 )
+                delay = max(delay, entry.get("retry_after_seconds", 0))
+                entry["retry_wait_seconds"] = delay
+                self.audit.publish(entry)
                 if delay >= deadline - time.monotonic():
                     raise TimeoutError("Attempt deadline reached during retry backoff")
                 await asyncio.sleep(delay)

@@ -4,6 +4,8 @@ import asyncio
 import copy
 import json
 import time
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 
 import httpx
 import pytest
@@ -11,7 +13,14 @@ import pytest
 from benchmark.audit import AuditTrail
 from benchmark.budgets import load_draft
 from benchmark.costs import CostAccountingError, Ledger, Prices, SpendingLimit
-from benchmark.model import ContextLimit, ModelAPIError, OpenRouterModel, input_tokens
+from benchmark.model import (
+    ContextLimit,
+    ModelAPIError,
+    OpenRouterModel,
+    error_details,
+    input_tokens,
+    retry_after,
+)
 from tests.support import completion
 
 
@@ -23,13 +32,13 @@ def model_factory(tmp_path, monkeypatch):
     monkeypatch.setattr("benchmark.model.input_tokens", lambda *args: 128)
     counter = 0
 
-    def create(handler, config=None):
+    def create(handler, config=None, *, attempt_limit=2):
         nonlocal counter
         counter += 1
         config = copy.deepcopy(config or load_draft())
         config["live"]["retry_initial_seconds"] = 0
         config["live"]["retry_max_seconds"] = 0
-        ledger = Ledger(tmp_path / f"spending-{counter}.sqlite3", 10, 2)
+        ledger = Ledger(tmp_path / f"spending-{counter}.sqlite3", 10, attempt_limit)
         audit = AuditTrail(
             "synthetic-run", "synthetic-sample", tmp_path / f"audit-{counter}.jsonl"
         )
@@ -45,13 +54,13 @@ def model_factory(tmp_path, monkeypatch):
     return create
 
 
-def generate(model, messages=None):
+def generate(model, messages=None, *, deadline_seconds=5):
     async def run():
         await model.check_route()
         return await model.generate(
             messages or [{"role": "user", "content": "Synthetic record"}],
             [],
-            time.monotonic() + 5,
+            time.monotonic() + deadline_seconds,
         )
 
     return asyncio.run(run())
@@ -271,3 +280,200 @@ def test_unknown_model_requires_explicit_token_estimate():
     )
     with pytest.raises(CostAccountingError):
         input_tokens([], [], "unknown/model")
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("12", 12),
+        ("0", 0),
+        ("-1", None),
+        (None, None),
+        ("invalid", None),
+        ("nan", None),
+        ("inf", None),
+    ],
+)
+def test_retry_after_header(value, expected):
+    assert retry_after(value) == expected
+
+
+def test_retry_after_accepts_http_date():
+    future = datetime.now(timezone.utc) + timedelta(seconds=60)
+    assert retry_after(format_datetime(future, usegmt=True)) == pytest.approx(60, abs=2)
+
+
+def test_error_diagnostics_redact_credentials_and_keep_correlation_ids():
+    response = httpx.Response(
+        429,
+        headers={"X-Request-Id": "request-123", "Retry-After": "12"},
+        json={
+            "id": "gen-synthetic-error",
+            "error": {
+                "code": 429,
+                "message": "Rejected synthetic-key and Bearer other-secret",
+                "metadata": {
+                    "provider_name": "Azure",
+                    "raw": "sk-or-v1-another-key",
+                    "limit_source": "openrouter_in_flight_budget",
+                    "ignored": "private",
+                },
+            },
+        },
+    )
+    details = error_details(response, "synthetic-key")
+    encoded = json.dumps(details)
+    assert all(
+        secret not in encoded
+        for secret in (
+            "synthetic-key",
+            "other-secret",
+            "sk-or-v1-another-key",
+            "private",
+        )
+    )
+    assert details["generation_id"] == "gen-synthetic-error"
+    assert details["provider_request_id"] == "request-123"
+    assert details["retry_after_seconds"] == 12
+    assert details["api_error"]["provider_name"] == "Azure"
+    assert details["api_error"]["limit_source"] == "openrouter_in_flight_budget"
+    response.headers["X-Generation-Id"] = "gen-conflicting"
+    assert "generation_id" not in error_details(response, "synthetic-key")
+
+
+def test_confirmed_error_charges_release_holds_before_retry(model_factory, monkeypatch):
+    config = load_draft(model="mistralai/mistral-large-4-0")
+    config["budgets"]["model_retries"] = 4
+    calls = 0
+    delays = []
+
+    async def sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr("benchmark.model.asyncio.sleep", sleep)
+
+    def reply(request):
+        nonlocal calls
+        if request.method == "GET":
+            assert request.url.path == "/api/v1/generation"
+            assert request.url.params["id"] == f"gen-synthetic-{calls}"
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "id": f"gen-synthetic-{calls}",
+                        "model": "mistralai/mistral-large-4-0",
+                        "provider_name": None,
+                        "is_byok": False,
+                        "finish_reason": "error",
+                        "total_cost": 0,
+                    }
+                },
+            )
+        calls += 1
+        if calls <= 4:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "12"},
+                json={
+                    "id": f"gen-synthetic-{calls}",
+                    "error": {"code": 429, "message": "Rate limited"},
+                },
+            )
+        data = completion()
+        data["provider"] = config["live"]["provider_name"]
+        return httpx.Response(200, json=data)
+
+    model = model_factory(reply, config, attempt_limit=3)
+    generate(model, deadline_seconds=60)
+    assert calls == 5
+    assert delays == [12] * 4
+    assert model.ledger.totals()["held_usd"] == 0
+    assert model.ledger.totals()["billed_usd"] == 0.001
+    assert all(
+        entry["billing_status"] == "confirmed" for entry in model.audit.items[:4]
+    )
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        None,
+        "id",
+        "model",
+        "provider",
+        "byok",
+        "unfinished",
+        "cost",
+        "missing",
+        "timeout",
+        "malformed",
+    ],
+)
+def test_error_lookup_requires_confirmed_matching_billing(model_factory, defect):
+    config = load_draft()
+    config["budgets"]["model_retries"] = 0
+    requests = []
+    metadata = {
+        "id": "gen-synthetic-error",
+        "model": "openai/gpt-4.1-mini",
+        "provider_name": config["live"]["provider_name"],
+        "is_byok": False,
+        "finish_reason": "error",
+        "total_cost": 0.007,
+    }
+    field_changes = {
+        "id": ("id", "gen-other"),
+        "model": ("model", "another/model"),
+        "provider": ("provider_name", "Unexpected provider"),
+        "byok": ("is_byok", True),
+        "unfinished": ("finish_reason", None),
+        "cost": ("total_cost", None),
+    }
+    if defect in field_changes:
+        field, value = field_changes[defect]
+        metadata[field] = value
+
+    def reply(request):
+        requests.append(request.method)
+        if request.method == "POST":
+            return httpx.Response(
+                503,
+                headers={"X-Generation-Id": "gen-synthetic-error"},
+                json={"error": {"message": "Provider unavailable"}},
+            )
+        if defect == "missing":
+            return httpx.Response(404)
+        if defect == "timeout":
+            raise httpx.ReadTimeout("Synthetic lookup timeout")
+        return httpx.Response(
+            200, json=[] if defect == "malformed" else {"data": metadata}
+        )
+
+    model = model_factory(reply, config)
+    with pytest.raises(ModelAPIError):
+        generate(model)
+    assert requests == ["POST", "GET"]
+    totals = model.ledger.totals()
+    entry = model.audit.items[-1]
+    assert entry["generation_id"] == "gen-synthetic-error"
+    assert entry["api_error"]["message"] == "Provider unavailable"
+    if defect is None:
+        assert totals["billed_usd"] == 0.007
+        assert totals["held_usd"] == 0
+        assert entry["billing_status"] == "confirmed"
+    else:
+        assert totals["billed_usd"] == 0
+        assert totals["held_usd"] > 0
+        assert entry["billing_status"] == "unconfirmed"
+
+
+def test_retry_after_cannot_extend_attempt_deadline(model_factory):
+    model = model_factory(
+        lambda request: httpx.Response(429, headers={"Retry-After": "60"})
+    )
+    with pytest.raises(TimeoutError, match="backoff"):
+        generate(model)
+    assert len(model.audit.items) == 1
+    assert model.audit.items[0]["retry_wait_seconds"] == 60
+    assert model.ledger.totals()["held_usd"] > 0

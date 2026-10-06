@@ -247,11 +247,18 @@ credits; linked provider keys are unsupported. Search has separate billing.
 
 Every physical model, reviewer and search request reserves its maximum cost in
 `logs/spending.sqlite3` before it is sent. The provider's reported charge then
-settles the reservation; errors, cancellations and unverifiable billing keep
-the hold. A request that would exceed the optional local allowance or the
+settles the reservation. When an API error includes a generation ID, the model
+adapter checks OpenRouter's billing record and settles only a confirmed charge,
+including a confirmed zero. Timeouts, cancellations and unconfirmed charges
+keep the hold. A request that would exceed the optional local allowance or the
 attempt's safety ceiling is not sent. Without a local ceiling, the ledger
 records charges and holds but reports no local remaining allowance. No
 credentials enter a container or a trajectory.
+
+API errors retain sanitized diagnostics, correlation IDs and confirmed billing
+records in the private audit. Retries use exponential backoff and honor a valid
+`Retry-After` header; neither a billing lookup nor a retry extends the attempt
+deadline.
 
 Token usage comes from the provider. There is no cumulative token cap: turns,
 tool calls and time end an attempt, and each request must fit the model's
