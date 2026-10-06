@@ -222,3 +222,52 @@ def test_token_estimate_accepts_literal_special_token_text():
         )
         > 0
     )
+
+
+@pytest.mark.parametrize(
+    "model_id", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"]
+)
+def test_reasoning_profile_request_and_billing(model_factory, model_id):
+    config = load_draft(model=model_id)
+    message = {
+        "role": "assistant",
+        "content": None,
+        "reasoning_details": [
+            {"type": "reasoning.text", "text": "Synthetic reasoning."}
+        ],
+    }
+    requests = []
+
+    def reply(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        assert body["model"] == model_id
+        assert body["provider"]["only"] == [config["live"]["provider"]]
+        assert body["reasoning"] == {"enabled": True}
+        assert body["temperature"] == 0.6
+        assert body["max_tokens"] == config["budgets"]["agent_max_output_tokens"]
+        assert "max_completion_tokens" not in body
+        data = completion()
+        data["provider"] = config["live"]["provider_name"]
+        data["choices"][0]["message"] = message
+        return httpx.Response(200, json=data)
+
+    model = model_factory(reply, config)
+    first = generate(model)
+    generate(model, [{"role": "user", "content": "Synthetic record"}, first["message"]])
+    assert requests[1]["messages"][1] == message
+    assert model.ledger.totals()["billed_usd"] == 0.002
+
+
+def test_unknown_model_requires_explicit_token_estimate():
+    assert (
+        input_tokens(
+            [{"role": "user", "content": "Synthetic record"}],
+            [],
+            "qwen/qwen3.8-flash",
+            "o200k_base",
+        )
+        > 0
+    )
+    with pytest.raises(CostAccountingError):
+        input_tokens([], [], "unknown/model")

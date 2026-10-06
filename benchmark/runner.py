@@ -11,6 +11,7 @@ from harbor.job import Job
 from harbor.models.trial.result import TrialResult
 
 from benchmark.answers import is_success
+from benchmark.budgets import load_draft
 from benchmark.experiment import job_config, run_experiment
 from benchmark.oracle import redact
 from benchmark.packages import ROOT, Package, load_package
@@ -18,21 +19,31 @@ from sandbox.docker_host import ensure_image, select_platform
 
 
 def agent_config(
-    kind: str, package: Package | None = None, condition: str = "offline"
+    kind: str,
+    package: Package | None = None,
+    condition: str = "offline",
+    *,
+    settings: dict | None = None,
 ) -> dict:
     """The Harbor agent for each mode: Oracle, scripted wiring, or the live agent."""
     if kind == "oracle":
         return {"name": "oracle"}
     if kind == "live":
         return {
+            "name": "ariadne",
             "import_path": "benchmark.agent:LiveAgent",
-            "kwargs": {"condition": condition},
+            "model_name": (settings or load_draft())["models"]["agent"],
+            "kwargs": {
+                "condition": condition,
+                **({"config": settings} if settings else {}),
+            },
         }
     # Wiring submits the expected answer; flag tasks read it from the trial.
     if package is None:
         raise ValueError("Wiring needs the task package")
     flag = package.manifest["answer_type"] == "flag"
     return {
+        "name": "ariadne-scripted",
         "import_path": "benchmark.agent:ScriptedAgent",
         "kwargs": {
             "submission": None if flag else package.target,
@@ -116,6 +127,14 @@ def main() -> None:
         help="Paid run of the controlled model agent; a paired experiment unless --dev",
     )
     parser.add_argument(
+        "--model",
+        choices=tuple(load_draft().get("agents", {})),
+        help="Reviewed OpenRouter agent profile (default: configured baseline)",
+    )
+    parser.add_argument(
+        "--limits", type=Path, help="TOML overrides for execution and spending limits"
+    )
+    parser.add_argument(
         "--condition",
         choices=("offline", "web", "both"),
         help="With --live: default both for experiments, offline for --dev",
@@ -136,6 +155,14 @@ def main() -> None:
         help="Where Harbor jobs and experiments are written (default: jobs/)",
     )
     args = parser.parse_args()
+    if args.model is not None and not args.live:
+        parser.error("Model selection requires --live")
+    if args.limits is not None and not args.live:
+        parser.error("Limit overrides require --live")
+    try:
+        args.settings = load_draft(model=args.model, limits=args.limits)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     if args.condition is not None and not args.live:
         parser.error("Reviewed web access requires --live")
     if args.dev and args.condition == "both":
@@ -153,9 +180,12 @@ def main() -> None:
         condition = args.condition or "both"
         conditions = ("offline", "web") if condition == "both" else (condition,)
         folder = asyncio.run(
-            run_experiment(packages, args.jobs_dir, conditions=conditions)
+            run_experiment(
+                packages, args.jobs_dir, conditions=conditions, settings=args.settings
+            )
         )
         print(f"Harbor experiment: {folder}")
+        print(f"View rollouts: uv run harbor view {folder / 'jobs'}")
         print(
             "Outcomes await independent review; see summary.json and the retained trials."
         )
@@ -171,7 +201,9 @@ def run_check(package, args) -> None:
         run_job(
             package.root,
             args.jobs_dir,
-            agent_config(kind, package, condition),
+            agent_config(
+                kind, package, condition, settings=getattr(args, "settings", None)
+            ),
             dev=args.dev or args.live,
         )
     )

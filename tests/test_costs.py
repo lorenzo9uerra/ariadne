@@ -1,6 +1,7 @@
 """Billing and provider checks with mocked APIs."""
 
 import copy
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
@@ -104,11 +105,29 @@ def test_reviewed_unbilled_rejection_releases_hold_without_generation_id(tmp_pat
     assert ledger.totals() == {"billed_usd": 0, "held_usd": 0, "remaining_usd": 1}
 
 
-def test_cap_cannot_be_changed_on_restart(tmp_path):
+def test_local_ceiling_can_change_without_resetting_old_holds(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARIADNE_SPENDING_LIMIT_USD", raising=False)
     path = tmp_path / "spend.sqlite3"
-    Ledger(path, 10)
-    with pytest.raises(CostAccountingError, match="cannot be changed"):
-        Ledger(path, 20)
+    first = Ledger(path, 1)
+    first.reserve("previous", "agent", "model", "0.75")
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE budget (cap INTEGER NOT NULL)")
+        db.execute("INSERT INTO budget VALUES (1000000)")
+    unlimited = Ledger(path, attempt_limit_usd=2)
+    assert unlimited.totals()["remaining_usd"] is None
+    unlimited.reserve("next", "agent", "model", "0.5")
+    assert unlimited.totals()["held_usd"] == 1.25
+    with pytest.raises(SpendingLimit):
+        Ledger(path, 1).reserve("next", "agent", "model", "0.1")
+    Ledger(path, 2).reserve("next", "agent", "model", "0.1")
+
+
+def test_optional_local_ceiling_comes_from_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARIADNE_SPENDING_LIMIT_USD", "1")
+    ledger = Ledger(tmp_path / "spend.sqlite3")
+    ledger.reserve("run", "agent", "model", "0.75")
+    with pytest.raises(SpendingLimit):
+        ledger.reserve("run", "agent", "model", "0.26")
 
 
 def test_overrun_is_preserved_and_prevents_further_spending(tmp_path):
@@ -159,24 +178,22 @@ def test_per_run_totals_report_shared_remaining_allowance(tmp_path):
 
 @pytest.mark.parametrize(
     "patch",
-    [
-        {"limit": None},
-        {"limit": 11},
-        {"limit": 0},
-        {"limit_reset": "daily"},
-        {"limit": float("nan")},
-    ],
+    [{"limit": float("nan")}, {"limit_remaining": None}, {"limit_remaining": True}],
 )
-def test_key_must_have_nonresetting_development_cap(patch):
+def test_key_rejects_unverifiable_allowance(patch):
     with pytest.raises(CostAccountingError):
-        check_key(key_data() | patch, 10)
+        check_key(key_data() | patch)
 
 
-def test_key_exhaustion_and_valid_cap():
-    check_key(key_data(), 10)
-    check_key(key_data() | {"include_byok_in_limit": False}, 10)
+def test_key_limit_is_provider_configuration():
+    check_key(key_data())
+    check_key(key_data() | {"limit": 100, "limit_reset": "daily"})
+    check_key(key_data() | {"limit": None, "limit_remaining": None})
+    check_key(key_data() | {"include_byok_in_limit": False})
     with pytest.raises(SpendingLimit):
-        check_key(key_data() | {"limit_remaining": 0}, 10)
+        check_key(key_data() | {"limit_remaining": 0})
+    with pytest.raises(SpendingLimit):
+        check_key(key_data() | {"limit": 0})
 
 
 def test_full_context_reservation_and_verified_rates():
@@ -298,3 +315,42 @@ def test_attempt_ceiling_applies_per_run(tmp_path):
         ledger.reserve("a", "monitor", "m", "0.5")
     ledger.reserve("b", "agent", "m", "0.9")  # Another attempt is unaffected.
     assert issubclass(AttemptSpendingLimit, SpendingLimit)
+
+
+@pytest.mark.parametrize("model", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"])
+def test_selected_profile_prices_and_reservations(model):
+    config = load_draft(model=model)
+    prices = Prices.from_config(config)
+    is_mistral = model.startswith("mistralai/")
+    assert prices.input == Decimal("0.68" if is_mistral else "0.15")
+    assert prices.output == Decimal("2.09" if is_mistral else "0.47")
+    assert config["models"]["agent"] == "openrouter/" + model
+    assert config["budgets"]["agent_max_output_tokens"] == (
+        262144 if is_mistral else 131072
+    )
+    assert config["live"]["reasoning"] is True
+    assert config["live"]["temperature"] == 0.6
+    assert "limit_usd" not in config["spending"]
+    assert load_draft()["models"]["agent"] == "openrouter/openai/gpt-4.1-mini"
+    if not is_mistral:
+        assert prices.reservation(131072) == Decimal("0.41160384")
+
+
+def test_discount_change_stops_the_pinned_route():
+    config = load_draft(model="mistralai/mistral-large-4-0")
+    endpoint = {
+        "tag": "mistral",
+        "context_length": 524288,
+        "max_completion_tokens": 262144,
+        "supported_parameters": ["tools", "max_tokens", "reasoning"],
+        "pricing": {
+            "prompt": "0.00000068",
+            "completion": "0.00000209",
+            "input_cache_read": "0.00000007",
+            "discount": 0.5,
+        },
+    }
+    check_endpoint({"endpoints": [endpoint]}, config, Prices.from_config(config))
+    endpoint["pricing"]["discount"] = 0
+    with pytest.raises(CostAccountingError):
+        check_endpoint({"endpoints": [endpoint]}, config, Prices.from_config(config))

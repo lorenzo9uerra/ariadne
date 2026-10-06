@@ -16,6 +16,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.trial.config import TrialConfig
 from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
 from harbor.models.verifier.result import VerifierResult
+from harbor.viewer.scanner import JobScanner
 
 from benchmark import experiment, runner
 from benchmark.answers import METRICS, reward_values
@@ -170,6 +171,14 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
         "web",
     }
     assert all(config.agents[0].kwargs["config"] == settings for config in configs)
+    assert all(config.agents[0].name == "ariadne" for config in configs)
+    assert all(config.jobs_dir == folder / "jobs" for config in configs)
+    assert set(JobScanner(folder / "jobs").list_jobs()) == {
+        item["name"] for item in plan["jobs"]
+    }
+    assert all(
+        config.agents[0].model_name == settings["models"]["agent"] for config in configs
+    )
     other = experiment.create_plan(
         [package], tmp_path / "other", ("offline", "web"), settings=settings, seed=7
     )
@@ -186,6 +195,19 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
     assert report["complete"] and report["counted_cost_usd"] == 6
     assert report["clean_web_minus_offline"] == 0
     assert report["paired_differences"] == {package.id: 0}
+
+
+def test_legacy_experiment_keeps_original_job_paths(harness, tmp_path):
+    package, settings, _, configs = harness
+    folder = tmp_path / "legacy"
+    plan = experiment.create_plan(
+        [package], folder, ("offline",), settings=settings, seed=7
+    )
+    plan["version"] = 1
+    experiment.write_json(folder / "private/plan.json", plan)
+    asyncio.run(experiment.execute_job(folder, plan, plan["jobs"][0]))
+    assert configs[0].jobs_dir == folder
+    assert len(experiment.report(folder)["attempts"]) == 3
 
 
 def test_json_components_contamination_and_scope_are_per_attempt(harness, tmp_path):
@@ -664,3 +686,50 @@ def test_web_content_the_labeller_rejects_goes_to_a_human(
         (result.parent / "private/audit.jsonl").write_text(json.dumps(delivered) + "\n")
     records = asyncio.run(autoreview.run(folder, "key", ledger=None))
     assert all("contamination_suspected" in r["findings"] for r in records)
+
+
+@pytest.mark.parametrize("model", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"])
+def test_cli_model_profile_reaches_the_frozen_experiment(
+    harness, tmp_path, monkeypatch, model
+):
+    seen = []
+    limits = tmp_path / "limits.toml"
+    limits.write_text(
+        '[budgets]\nelapsed_seconds = 1800\n[spending]\nattempt_limit_usd = "5"\n'
+    )
+
+    async def paired(packages, jobs_dir, **kwargs):
+        seen.append(kwargs["settings"])
+        return tmp_path
+
+    monkeypatch.setattr(runner, "load_package", lambda path: harness[0])
+    monkeypatch.setattr(runner, "ensure_image", lambda *args: None)
+    monkeypatch.setattr(runner, "select_platform", lambda *args: "linux/amd64")
+    monkeypatch.setattr(runner, "run_experiment", paired)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "runner",
+            "--challenge",
+            "synthetic",
+            "--live",
+            "--model",
+            model,
+            "--limits",
+            str(limits),
+        ],
+    )
+    runner.main()
+    assert seen[0]["models"]["agent"] == "openrouter/" + model
+    assert seen[0]["runs"]["independent_attempts"] == 3
+    assert seen[0]["budgets"]["elapsed_seconds"] == 1800
+    assert seen[0]["spending"]["attempt_limit_usd"] == "5"
+    folder = asyncio.run(
+        experiment.run_experiment(
+            [harness[0]], tmp_path / "jobs", settings=seen[0], seed=7
+        )
+    )
+    plan = experiment.read_plan(folder)
+    assert plan["settings"] == seen[0]
+    assert all(config.agents[0].override_timeout_sec == 1805 for config in harness[3])

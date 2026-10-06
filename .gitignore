@@ -1,6 +1,7 @@
 # Local configuration and credentials
 .env
 .env.*
+/limits.local.toml
 /infra/ansible/inventory.ini
 
 # Python environments and generated caches

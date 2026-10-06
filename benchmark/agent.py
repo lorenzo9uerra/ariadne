@@ -333,8 +333,10 @@ class LiveAgent(BaseAgent):
             raise ValueError("The condition must be offline or web")
         self.condition = condition
         self.web_enabled = condition == "web"
-        self.config = config or load_draft()
         model_name = kwargs.pop("model_name", None)
+        self.config = config or load_draft()
+        if config is None and model_name not in (None, self.config["models"]["agent"]):
+            self.config = load_draft(model=model_name)
         if model_name not in (None, self.config["models"]["agent"]):
             raise ValueError("Review the configuration before changing the model")
         super().__init__(*args, model_name=self.config["models"]["agent"], **kwargs)
@@ -373,7 +375,7 @@ class LiveAgent(BaseAgent):
         harness = tomllib.loads((ROOT / "config.toml").read_text())
         ledger = Ledger(
             ROOT / harness["spend_ledger"],
-            self.config["spending"]["limit_usd"],
+            self.config["spending"].get("limit_usd"),
             self.config["spending"]["attempt_limit_usd"],
         )
         self.audit = AuditTrail(

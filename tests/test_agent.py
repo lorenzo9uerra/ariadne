@@ -502,6 +502,57 @@ def test_bash_preserves_streams_and_reports_timeout(tmp_path, live_mock, monkeyp
     assert context.metadata["stop_reason"] == "submitted"
 
 
+def test_trajectory_retains_model_text_reasoning_tools_and_usage(
+    tmp_path, live_mock, monkeypatch
+):
+    config, replies, _ = live_mock
+    reply = completion(
+        [api_call("bash", {"command": "synthetic command"})],
+        content="I will inspect the synthetic record.",
+    )
+    message = reply["choices"][0]["message"]
+    message["reasoning"] = "Synthetic reasoning marker."
+    message["reasoning_details"] = [{"type": "reasoning.text", "text": "detail"}]
+    replies.extend([reply, completion([api_call("submit", {"answer": SAFE})])])
+    environment = environment_stub(tmp_path)
+
+    async def execute(*args, **kwargs):
+        out, err = b"synthetic stdout\n", b"synthetic stderr\n"
+        fields = [
+            "0",
+            str(len(out)),
+            str(len(err)),
+            base64.b64encode(out).decode(),
+            base64.b64encode(err).decode(),
+        ]
+        return ExecResult(return_code=0, stdout="\n".join(fields) + "\n")
+
+    monkeypatch.setattr(environment, "exec", execute)
+    context, trajectory = run_agent(environment, config)
+    steps = [step for step in trajectory.steps if step.source == "agent"]
+    assert len(steps) == 2
+    step = steps[0]
+    assert step.message == message["content"]
+    assert step.reasoning_content == message["reasoning"]
+    assert (
+        step.extra["raw_message"]["reasoning_details"] == message["reasoning_details"]
+    )
+    call = step.tool_calls[0]
+    assert call.function_name == "bash" and call.arguments == {
+        "command": "synthetic command"
+    }
+    observed = step.observation.results[0]
+    assert observed.source_call_id == call.tool_call_id
+    result = json.loads(observed.content)
+    assert result["stdout"] == "synthetic stdout\n"
+    assert result["stderr"] == "synthetic stderr\n"
+    assert step.metrics.prompt_tokens == 100 and step.metrics.completion_tokens == 10
+    assert step.metrics.cost_usd == 0.001
+    assert context.cost_usd == 0.002 and context.n_input_tokens == 200
+    assert trajectory.extra["stop_reason"] == "submitted"
+    assert not (environment.trial_paths.agent_dir / "trajectory.tmp").exists()
+
+
 def test_expired_attempt_does_not_send_generation(tmp_path, live_mock):
     config, replies, seen = live_mock
     config["budgets"]["elapsed_seconds"] = 0
@@ -643,9 +694,14 @@ def test_mocked_live_agent_through_native_job(tmp_path, live_mock, case):
         )
         replies.append(completion([api_call("submit", {"answer": WRONG})]))
     result, folder = asyncio.run(
-        run_job(task, tmp_path / "jobs", agent_config("live"), dev=True)
+        run_job(
+            task, tmp_path / "jobs", agent_config("live", settings=config), dev=True
+        )
     )
     assert result.stats.n_errored_trials == 0
+    native = JobConfig.model_validate_json((folder / "config.json").read_text())
+    assert native.agents[0].name == "ariadne"
+    assert native.agents[0].model_name == config["models"]["agent"]
     path = next(folder.glob("*/result.json"))
     trial = TrialResult.model_validate_json(path.read_text())
     assert trial.exception_info is None
@@ -662,6 +718,7 @@ def test_mocked_live_agent_through_native_job(tmp_path, live_mock, case):
         (path.parent / "agent/trajectory.json").read_text()
     )
     assert trajectory.agent.name == "ariadne"
+    assert trajectory.agent.model_name == native.agents[0].model_name
     assert (path.parent / "private/audit.jsonl").is_file()
     assert all("synthetic-key" not in json.dumps(request) for request in seen)
 
@@ -749,7 +806,7 @@ def test_live_api_with_synthetic_task(tmp_path):
         description="Read /workspace/record.txt using bash. It contains a supplied synthetic JSON answer. Return that exact text using the submit tool.",
     )
     task = export_task(package, tmp_path / "task", image, platform)
-    settings = load_draft()
+    settings = load_draft(model=os.environ.get("ARIADNE_AGENT_MODEL"))
     settings["budgets"]["agent_turns"] = 4
     settings["budgets"]["agent_max_output_tokens"] = 512
     settings["budgets"]["model_retries"] = 0
@@ -758,12 +815,7 @@ def test_live_api_with_synthetic_task(tmp_path):
             **yaml.safe_load((ROOT / "job.dev.yaml").read_text()),
             "jobs_dir": str(ROOT / "jobs"),
             "tasks": [{"path": str(task)}],
-            "agents": [
-                {
-                    "import_path": "benchmark.agent:LiveAgent",
-                    "kwargs": {"config": settings},
-                }
-            ],
+            "agents": [agent_config("live", settings=settings)],
         }
     )
 
@@ -800,7 +852,7 @@ def test_live_reviewed_web_with_synthetic_task(tmp_path):
         description="Read /workspace/record.txt using bash; it contains a public supplied JSON answer. Use web_search once for Python pathlib read_text documentation, then web_fetch once for a documentation URL from those results. Finally submit the exact JSON from the record through the submit tool.",
     )
     task = export_review_task(package, tmp_path / "task", image, platform)
-    settings = load_draft()
+    settings = load_draft(model=os.environ.get("ARIADNE_AGENT_MODEL"))
     settings["budgets"].update(
         agent_turns=6, agent_max_output_tokens=512, model_retries=0, web_calls=2
     )
@@ -809,12 +861,7 @@ def test_live_reviewed_web_with_synthetic_task(tmp_path):
             **yaml.safe_load((ROOT / "job.dev.yaml").read_text()),
             "jobs_dir": str(ROOT / "jobs"),
             "tasks": [{"path": str(task)}],
-            "agents": [
-                {
-                    "import_path": "benchmark.agent:LiveAgent",
-                    "kwargs": {"condition": "web", "config": settings},
-                }
-            ],
+            "agents": [agent_config("live", condition="web", settings=settings)],
         }
     )
 

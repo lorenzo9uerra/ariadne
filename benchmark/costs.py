@@ -1,6 +1,7 @@
 """Persistent request reservations and OpenRouter billing checks for live runs."""
 
 import json
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -20,7 +21,7 @@ MICRODOLLARS = Decimal(1_000_000)
 
 
 class SpendingLimit(RuntimeError):
-    """The shared development allowance cannot fund another request."""
+    """The configured spending allowance cannot fund another request."""
 
 
 class AttemptSpendingLimit(SpendingLimit):
@@ -49,7 +50,7 @@ def microdollars(value: object) -> int:
 
 
 class Ledger:
-    """SQLite transactions prevent concurrent processes from overspending locally.
+    """Track charges and reservations, enforcing any configured local ceilings.
 
     Reserved and uncertain requests consume their entire reservation until
     settled. Crashes therefore retain the hold. Fault attribution never refunds
@@ -57,19 +58,23 @@ class Ledger:
     """
 
     def __init__(
-        self, path: Path, limit_usd: object, attempt_limit_usd: object | None = None
+        self,
+        path: Path,
+        limit_usd: object = None,
+        attempt_limit_usd: object | None = None,
     ):
         self.path = path
-        self.limit = microdollars(limit_usd)
-        # A safety net per run_id (one attempt), checked with the shared cap.
+        if limit_usd is None:
+            limit_usd = os.environ.get("ARIADNE_SPENDING_LIMIT_USD")
+        self.limit = microdollars(limit_usd) if limit_usd is not None else None
+        # One run_id represents one attempt.
         self.attempt_limit = (
             microdollars(attempt_limit_usd) if attempt_limit_usd is not None else None
         )
-        if self.limit <= 0:
-            raise CostAccountingError("The development spending cap must be positive")
+        if self.limit is not None and self.limit <= 0:
+            raise CostAccountingError("The local spending ceiling must be positive")
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
-            db.execute("CREATE TABLE IF NOT EXISTS budget (cap INTEGER NOT NULL)")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS requests ("
                 "id TEXT PRIMARY KEY, run_id TEXT NOT NULL, role TEXT NOT NULL, "
@@ -77,12 +82,6 @@ class Ledger:
                 "status TEXT NOT NULL, generation_id TEXT, "
                 "created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             )
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT cap FROM budget").fetchone()
-            if row is None:
-                db.execute("INSERT INTO budget VALUES (?)", (self.limit,))
-            elif row[0] != self.limit:
-                raise CostAccountingError("The ledger's spending cap cannot be changed")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -103,8 +102,8 @@ class Ledger:
             committed = db.execute(
                 "SELECT COALESCE(SUM(COALESCE(billed, reserved)), 0) FROM requests"
             ).fetchone()[0]
-            if committed + reserved > self.limit:
-                raise SpendingLimit("Development spending allowance exhausted")
+            if self.limit is not None and committed + reserved > self.limit:
+                raise SpendingLimit("Local spending allowance exhausted")
             if self.attempt_limit is not None:
                 spent = db.execute(
                     "SELECT COALESCE(SUM(COALESCE(billed, reserved)), 0) "
@@ -175,7 +174,11 @@ class Ledger:
         return {
             "billed_usd": billed / 1_000_000,
             "held_usd": held / 1_000_000,
-            "remaining_usd": max(0, self.limit - committed) / 1_000_000,
+            "remaining_usd": (
+                max(0, self.limit - committed) / 1_000_000
+                if self.limit is not None
+                else None
+            ),
         }
 
 
@@ -209,6 +212,12 @@ class Prices:
     output: Decimal
     cached_input: Decimal
     context_tokens: int
+    cache_write: Decimal = Decimal(0)
+    max_prompt_tokens: int | None = None
+
+    @property
+    def prompt_limit(self) -> int:
+        return self.max_prompt_tokens or self.context_tokens
 
     @classmethod
     def from_config(cls, config: dict) -> "Prices":
@@ -216,37 +225,41 @@ class Prices:
         context = pricing["context_tokens"]
         if type(context) is not int or context <= 0:
             raise CostAccountingError("A positive context-token bound is required")
+        prompt_limit = pricing.get("max_prompt_tokens")
+        if prompt_limit is not None and (
+            type(prompt_limit) is not int or not 0 < prompt_limit <= context
+        ):
+            raise CostAccountingError("Invalid prompt-token limit")
         return cls(
             amount(pricing["input_per_million"]),
             amount(pricing["output_per_million"]),
             amount(pricing["cached_input_per_million"]),
             context,
+            amount(pricing.get("cache_write_per_million", 0)),
+            prompt_limit,
         )
 
     def reservation(self, output_tokens: int) -> Decimal:
         # Reserve a whole context window, not a tokenizer estimate: the server
         # rejects longer input. Pricing every input token at the higher of the
-        # regular and cached rates keeps the hold an upper bound.
+        # regular and cached rates, plus any cache-write charge, covers both costs.
         return (
-            self.context_tokens * max(self.input, self.cached_input)
+            self.context_tokens
+            * (max(self.input, self.cached_input) + self.cache_write)
             + output_tokens * self.output
         ) / MICRODOLLARS
 
 
-def check_key(data: dict, limit_usd: object) -> None:
-    cap = amount(limit_usd)
-    if (
-        data.get("limit") is None
-        or amount(data["limit"]) <= 0
-        or amount(data["limit"]) > cap
-        or data.get("limit_reset") is not None
-    ):
-        raise CostAccountingError(
-            "Use a dedicated OpenRouter key with a non-resetting cap at most "
-            f"${cap}; BYOK inference is unsupported"
-        )
-    if data.get("limit_remaining") is None or amount(data["limit_remaining"]) <= 0:
-        raise SpendingLimit("OpenRouter key allowance exhausted")
+def check_key(data: dict) -> None:
+    if "limit" not in data:
+        raise CostAccountingError("OpenRouter key allowance is missing")
+    if data["limit"] is not None:
+        if amount(data["limit"]) <= 0:
+            raise SpendingLimit("OpenRouter key allowance exhausted")
+        if data.get("limit_remaining") is None:
+            raise CostAccountingError("OpenRouter key remaining allowance is missing")
+        if amount(data["limit_remaining"]) <= 0:
+            raise SpendingLimit("OpenRouter key allowance exhausted")
 
 
 def check_endpoint(data: dict, config: dict, prices: Prices) -> None:
@@ -260,12 +273,21 @@ def check_endpoint(data: dict, config: dict, prices: Prices) -> None:
         raise CostAccountingError("The pinned OpenRouter endpoint is unavailable")
     endpoint = endpoints[0]
     pricing = endpoint["pricing"]
+    discount = amount(pricing.get("discount", 0))
+    if discount > 1:
+        raise CostAccountingError("Invalid endpoint discount")
     if (
         amount(pricing["prompt"]) * MICRODOLLARS != prices.input
         or amount(pricing["completion"]) * MICRODOLLARS != prices.output
-        or amount(pricing["input_cache_read"]) * MICRODOLLARS != prices.cached_input
+        or amount(pricing.get("input_cache_read") or 0) * MICRODOLLARS
+        != prices.cached_input
+        or amount(pricing.get("input_cache_write") or 0) * MICRODOLLARS
+        != prices.cache_write
+        or discount != amount(live["pricing"].get("discount", 0))
         or amount(pricing.get("request", 0)) != 0
         or endpoint["context_length"] != prices.context_tokens
+        or endpoint.get("max_prompt_tokens") != prices.max_prompt_tokens
+        or ("reasoning" in live and "reasoning" not in endpoint["supported_parameters"])
         or endpoint["max_completion_tokens"]
         < config["budgets"]["agent_max_output_tokens"]
         or "tools" not in endpoint["supported_parameters"]
@@ -298,7 +320,7 @@ def preflight(config: dict, api_key: str) -> Prices:
         raise CostAccountingError("OPENROUTER_API_KEY is required")
     prices = Prices.from_config(config)
     timeout = config["live"]["preflight_timeout_seconds"]
-    check_key(read_json("/key", api_key, timeout), config["spending"]["limit_usd"])
+    check_key(read_json("/key", api_key, timeout))
     model_id = name.removeprefix("openrouter/")
     check_endpoint(
         read_json(f"/models/{model_id}/endpoints", None, timeout), config, prices

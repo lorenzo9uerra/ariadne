@@ -30,7 +30,16 @@ def docker(*args: str) -> str:
 
 def docker_architecture() -> str:
     """The CPU architecture of the Docker engine that will run the sandboxes."""
-    reported = docker("info", "--format", "{{.Architecture}}")
+    try:
+        reported = docker("info", "--format", "{{.Architecture}}")
+    except subprocess.CalledProcessError as error:
+        detail = (
+            error.stderr or f"Docker exited with status {error.returncode}"
+        ).strip()
+        raise SystemExit(
+            f"Docker host check failed:\n{detail}\n"
+            "Use 'docker context ls' to check the name passed to --docker-context."
+        ) from None
     if reported not in ARCHITECTURES:
         raise RuntimeError(f"Unsupported Docker host architecture: {reported}")
     return ARCHITECTURES[reported]

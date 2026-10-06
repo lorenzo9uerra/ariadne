@@ -143,7 +143,7 @@ def test_analysis_tools_through_docker(tmp_path):
     )
     task = export_task(package, tmp_path / "task", ensure_image(platform), platform)
     commands = [
-        "set -e; command -v file strings readelf objdump nm xxd gcc make python gdb nc zip unzip decompile; python --version",
+        "set -e; command -v base64 sha256sum grep sed awk find tar file strings readelf objdump nm xxd gcc make python gdb strace ltrace patchelf jq rg nc zip unzip decompile; python --version",
         "gcc -g -O0 -o /workspace/probe /workspace/probe.c && /workspace/probe",
         "readelf -s /workspace/probe",
         "python -c "
@@ -152,6 +152,21 @@ def test_analysis_tools_through_docker(tmp_path):
         ),
         "gdb --batch -q -nx -ex 'set disable-randomization off' -ex 'break identity' -ex run -ex 'print value' -ex continue /workspace/probe",
         "decompile /workspace/probe identity",
+        "python -c "
+        + shlex.quote(
+            "import requests; from z3 import BitVec, Solver, sat; "
+            "value=BitVec('value',8); solver=Solver(); solver.add(value+1==0); "
+            "assert solver.check()==sat and solver.model()[value].as_long()==255; "
+            "assert requests.Request('GET','http://target/example').prepare().url=='http://target/example'; "
+            "print('Z3 and requests passed')"
+        ),
+        "strace -o /workspace/syscalls.trace /workspace/probe && grep -F 'write(' /workspace/syscalls.trace",
+        "ltrace -o /workspace/library.trace /workspace/probe && grep -F 'puts(' /workspace/library.trace",
+        "cp /workspace/probe /workspace/probe-copy && patchelf --set-rpath /workspace /workspace/probe-copy "
+        '&& test "$(patchelf --print-rpath /workspace/probe-copy)" = /workspace '
+        "&& /workspace/probe-copy && printf 'patchelf passed\\n'",
+        "printf '{\"answer\":42}\\n' | jq -e '.answer == 42'",
+        "printf 'alpha\\nbeta\\n' > /workspace/text.txt && rg -n '^beta$' /workspace/text.txt",
     ]
     result, folder = asyncio.run(run_trial(task, tmp_path / "jobs", SAFE, commands))
     assert result.exception_info is None, (
@@ -172,10 +187,16 @@ def test_analysis_tools_through_docker(tmp_path):
             "pwntools passed",
             "$1 = 6",
             "identity",
+            "Z3 and requests passed",
+            "write(",
+            "puts(",
+            "patchelf passed",
+            "true",
+            "2:beta",
         ),
     ):
         assert record["exit_code"] == 0 and marker in record["stdout"], (
             "Synthetic tool check failed"
         )
-    assert len(observations) == 7
+    assert len(observations) == len(commands) + 1
     assert_isolation_and_cleanup(folder)

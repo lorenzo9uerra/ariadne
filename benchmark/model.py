@@ -28,11 +28,20 @@ class ModelAPIError(RuntimeError):
     pass
 
 
-def input_tokens(messages: list[dict], tools: list[dict], model: str) -> int:
+def input_tokens(
+    messages: list[dict],
+    tools: list[dict],
+    model: str,
+    encoding_name: str | None = None,
+) -> int:
     """Estimate this request, without truncating history or imposing a run token cap."""
     try:
-        encoding = tiktoken.encoding_for_model(model.rsplit("/", 1)[-1])
-    except KeyError:
+        encoding = (
+            tiktoken.get_encoding(encoding_name)
+            if encoding_name is not None
+            else tiktoken.encoding_for_model(model.rsplit("/", 1)[-1])
+        )
+    except (KeyError, ValueError):
         raise CostAccountingError("The model needs a reviewed tokenizer") from None
     text = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
     # Tool/message framing is an estimate. Provider context validation remains
@@ -84,12 +93,17 @@ class OpenRouterModel:
     ) -> dict:
         if not self.ready:
             raise CostAccountingError("Model preflight must pass before generation")
-        estimate = input_tokens(messages, tools, self.config["models"]["agent"])
+        estimate = input_tokens(
+            messages,
+            tools,
+            self.config["models"]["agent"],
+            self.config["live"].get("token_encoding"),
+        )
         output = min(
             self.config["budgets"]["agent_max_output_tokens"],
             self.prices.context_tokens - estimate,
         )
-        if output <= 0:
+        if output <= 0 or estimate > self.prices.prompt_limit:
             raise ContextLimit("The next request exceeds the context window")
         body = {
             "model": self.config["models"]["agent"].removeprefix("openrouter/"),
@@ -99,6 +113,8 @@ class OpenRouterModel:
             "provider": routing(self.config),
             self.config["live"]["output_token_parameter"]: output,
         }
+        if "reasoning" in self.config["live"]:
+            body["reasoning"] = {"enabled": self.config["live"]["reasoning"]}
         retries = self.config["budgets"]["model_retries"]
         async with httpx.AsyncClient(
             transport=self.transport,

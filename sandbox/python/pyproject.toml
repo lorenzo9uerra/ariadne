@@ -6,7 +6,9 @@ dependencies = [
     "gmpy2==2.3.0",
     "pwntools==4.15.0",
     "pycryptodome==3.23.0",
+    "requests==2.34.2",
     "sympy==1.14.0",
+    "z3-solver==4.15.4.0",
 ]
 
 [tool.uv]

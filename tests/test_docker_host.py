@@ -50,6 +50,20 @@ def test_reported_architectures_are_normalized(monkeypatch):
         docker_host.docker_architecture()
 
 
+def test_docker_connection_failure_reports_the_original_diagnostic(monkeypatch):
+    def fail(*args):
+        raise subprocess.CalledProcessError(
+            1, ["docker", *args], stderr='context "missing-vm": context not found'
+        )
+
+    monkeypatch.setattr(docker_host, "docker", fail)
+    with pytest.raises(SystemExit) as error:
+        docker_host.docker_architecture()
+    assert 'context "missing-vm": context not found' in str(error.value)
+    assert "docker context ls" in str(error.value)
+    assert error.value.__suppress_context__
+
+
 @pytest.mark.parametrize(
     ("endpoint", "expected"),
     [

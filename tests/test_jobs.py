@@ -5,14 +5,21 @@ import json
 import os
 import shlex
 
+import httpx
 import pytest
 import yaml
+from harbor.agents.factory import AgentFactory
 from harbor.job import Job
 from harbor.models.job.config import JobConfig
 from harbor.models.task.task import Task
 from harbor.models.trial.result import TrialResult
+from harbor.viewer.server import create_app
 
+from benchmark.agent import LiveAgent
+from benchmark.budgets import load_draft
+from benchmark.experiment import job_config
 from benchmark.packages import ROOT
+from benchmark.runner import agent_config
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
     SAFE,
@@ -37,6 +44,40 @@ def test_job_template_uses_native_schema_and_explicit_development_mode(dev):
     assert (
         config.environment.import_path == "sandbox.environment:AriadneDockerEnvironment"
     )
+
+
+@pytest.mark.parametrize("model", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"])
+def test_live_config_exposes_native_agent_and_model_labels(tmp_path, model):
+    from harbor.models.trial.config import AgentConfig
+
+    settings = load_draft(model=model)
+    config = AgentConfig.model_validate(agent_config("live", settings=settings))
+    assert config.name == "ariadne"
+    assert config.model_name == settings["models"]["agent"]
+    assert AgentFactory.get_agent_class_from_config(config) is LiveAgent
+    job = job_config(
+        tmp_path / "task",
+        tmp_path / "jobs",
+        config.model_dump(),
+        settings=settings,
+        name="synthetic-labels",
+    )
+    folder = job.jobs_dir / job.job_name
+    folder.mkdir(parents=True)
+    (folder / "config.json").write_text(job.model_dump_json())
+
+    async def listing():
+        transport = httpx.ASGITransport(app=create_app(job.jobs_dir))
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
+            return await client.get("/api/jobs")
+
+    response = asyncio.run(listing())
+    assert response.status_code == 200
+    row = response.json()["items"][0]
+    assert row["agents"] == ["ariadne"]
+    assert row["models"] == [model]
 
 
 @pytest.mark.skipif(
