@@ -1,4 +1,4 @@
-"""Bounded, reviewed text tools with an injected live or synthetic transport."""
+"""Reviewed search and page retrieval using a live or synthetic backend."""
 
 import asyncio
 import ipaddress
@@ -205,7 +205,7 @@ def web_search(session: Session, backend: Backend):
 
 def web_fetch(session: Session, backend: Backend):
     async def execute(url: str) -> str:
-        """Fetch a bounded public text page through solution filtering.
+        """Fetch a public page through the solution-material review.
 
         Args:
             url: A public HTTP(S) reference URL returned by search or already known.

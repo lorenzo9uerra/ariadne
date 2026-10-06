@@ -1,5 +1,5 @@
 #!/opt/agent-python/.venv/bin/python
-"""Run Ghidra headlessly with bounded time, heap and retained output."""
+"""Run Ghidra headlessly with time, memory and output limits."""
 
 import os
 import selectors
@@ -167,7 +167,7 @@ def run(binary: Path, selector: str) -> int:
 def main() -> int:
     if sys.argv[1:] == ["--help"]:
         print("Usage: decompile BINARY [FUNCTION_NAME_OR_ADDRESS]")
-        print("Returns bounded C-like output; use objdump for assembly.")
+        print("Returns C-like code, truncated at the output limit; use objdump for assembly.")
         return 0
     if len(sys.argv) not in (2, 3):
         print("Usage: decompile BINARY [FUNCTION_NAME_OR_ADDRESS]", file=sys.stderr)

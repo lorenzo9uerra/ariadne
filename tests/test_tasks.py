@@ -17,12 +17,16 @@ def test_all_tasks_use_native_definitions_and_separate_verifier():
         package = load_package(path.parent)
         task = Task(path.parent)
         assert task.config.metadata["ariadne"] == package.manifest
+        assert task.config.source
+        assert "adaptations" not in package.manifest
+        assert (package.root / "private/provenance.md").is_file()
         assert task.config.task is not None
         assert task.config.task.name == f"ariadne/{package.id}"
         assert task.config.verifier.environment_mode is not None
         assert task.config.verifier.environment_mode.value == "separate"
         assert task.instruction == package.description
         assert package.manifest["description"] == "instruction.md"
+        assert "task_success" in package.manifest["reward_weights"]
         assert (
             hashlib.sha256(task.instruction.encode()).hexdigest()
             == package.manifest["instruction_sha256"]

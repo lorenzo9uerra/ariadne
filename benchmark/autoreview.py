@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 
+from benchmark.answers import is_success
 from benchmark.experiment import journal, read_plan, review
 from benchmark.packages import load_package
 from benchmark.reviewers import (
@@ -207,7 +208,7 @@ async def review_attempt(folder, plan, attempt, models, client, key, ledger) -> 
     records = read_records(trial_dir)
     result = json.loads(records["result.json"][0] or b"{}")
     rewards = (result.get("verifier_result") or {}).get("rewards") or {}
-    solved = bool(rewards) and all(rewards.values())
+    solved = is_success(rewards)
     findings, data = deterministic_checks(
         package, trial_dir, attempt["attempt"], records, solved
     )

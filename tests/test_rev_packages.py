@@ -49,7 +49,7 @@ def assert_package_record(package_id: str) -> None:
     assert context["context_version"] == "v2"
     assert context["recognition_markers"] == []
     assert context["descriptions"]["agent"] == package.description
-    assert context["adaptations"] == data["adaptations"]
+    assert "adaptations" not in data
     for relative, digest in pinned_hashes(data).items():
         actual = hashlib.sha256((package.root / relative).read_bytes()).hexdigest()
         assert actual == digest
