@@ -1,8 +1,4 @@
-"""Service-package plumbing tested with a harmless synthetic TCP fixture.
-
-These checks verify loader and runner behavior, not the correctness or
-solvability of any real challenge.
-"""
+"""Service package checks with a synthetic TCP target."""
 
 import shutil
 from pathlib import Path

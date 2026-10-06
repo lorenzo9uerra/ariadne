@@ -220,7 +220,7 @@ def synthetic_package(root: Path, architecture="amd64") -> Package:
 
 
 def review_package(root, architecture="amd64", public_answer=False):
-    """A complete admitted synthetic record; contains no challenge algorithms."""
+    """An admitted synthetic package with reviewer context."""
     package = synthetic_package(root, architecture)
     if public_answer:
         (root / "record.txt").write_text(SAFE)

@@ -1,8 +1,6 @@
 services:
   default:
-    # Built once per Docker host by sandbox/docker_host.py from sandbox/Dockerfile,
-    # and named by a hash of every build input, so it is reused until an input
-    # changes. There is no build section: the shared image is reused without rebuilding.
+    # The runner selects a shared image tagged by its build inputs.
     image: ariadne-sandbox:${SANDBOX_IMAGE_TAG:?set by the runner from the image inputs}
     platform: ${SANDBOX_PLATFORM:-linux/arm64}
     init: true

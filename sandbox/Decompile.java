@@ -1,4 +1,4 @@
-// General-purpose headless exporter; independent of any challenge.
+// Export decompiled functions for the headless decompile wrapper.
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.util.headless.HeadlessScript;

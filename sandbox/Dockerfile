@@ -1,6 +1,4 @@
-# Immutable multi-architecture base: Debian bookworm. The compiler, SageMath and
-# every other system package come from one pinned Debian snapshot, so no two
-# toolchains compete for the same commands.
+# Use a pinned Debian snapshot for all system packages.
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
 COPY tool-versions.env /etc/ariadne-tools.env
@@ -47,8 +45,7 @@ RUN . /etc/ariadne-tools.env \
     && uv sync --project /opt/agent-python --locked --no-dev --python "$PYTHON_VERSION" \
     && rm -rf /tmp/uv-cache
 COPY Decompile.java /opt/ariadne-scripts/Decompile.java
-# Compile only the generic exporter at build time. Do not retain the imported
-# system program, analysis project, runtime settings or OSGi framework cache.
+# Precompile the exporter and discard the temporary analysis data and settings.
 RUN . /etc/ariadne-tools.env \
     && mkdir -p /tmp/ghidra-build/home /tmp/ghidra-build/project \
     && XDG_CONFIG_HOME=/tmp/ghidra-build/home/config \

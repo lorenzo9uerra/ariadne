@@ -1,4 +1,4 @@
-"""Admission checks for rev-01 and rev-02 without displaying private material."""
+"""Admission checks for rev-01 and rev-02."""
 
 import hashlib
 import importlib.util

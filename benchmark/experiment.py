@@ -42,7 +42,7 @@ def digest(path: Path) -> str:
 
 
 def tree_digest(root: Path) -> str:
-    """Hash inputs as bytes without interpreting challenge code or solutions."""
+    """Hash directory paths and file contents deterministically."""
     files = {}
     for path in sorted(root.rglob("*")):
         if path.is_symlink():

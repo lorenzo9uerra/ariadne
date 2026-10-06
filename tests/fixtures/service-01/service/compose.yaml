@@ -1,7 +1,4 @@
-# Synthetic service-package fixture: agent sandbox plus one harmless TCP
-# target on a single internal network. Real packages model their
-# service/compose.yaml on this file; the sandbox verifier rejects deviations
-# (bind mounts, extra networks, published ports, privileges).
+# Agent and synthetic TCP target on one isolated internal network.
 services:
   default:
     extends:

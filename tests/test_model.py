@@ -1,4 +1,4 @@
-"""Mocked model requests: no credentials or inference services are used."""
+"""Mocked OpenRouter requests and spending controls."""
 
 import asyncio
 import copy

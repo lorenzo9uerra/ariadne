@@ -1,9 +1,4 @@
-"""The live web backend: Tavily search and a pinned-address HTTP fetch.
-
-Implements the Backend contract in benchmark/web.py. web.py validates every
-URL and resolved address and bounds the results; this module only talks to the
-network. Search credits are reserved and settled in the spending ledger.
-"""
+"""Tavily search and HTTP fetch transport with spending controls."""
 
 import asyncio
 import ipaddress
@@ -29,7 +24,7 @@ class LiveBackend:
         ledger: Ledger,
         run_id: str,
         limits: dict,
-        transport: httpx.AsyncBaseTransport | None = None,  # Tests inject a mock.
+        transport: httpx.AsyncBaseTransport | None = None,
         *,
         audit: AuditTrail | None = None,
     ):

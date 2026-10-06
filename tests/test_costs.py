@@ -1,4 +1,4 @@
-"""Synthetic billing and provider checks; no paid model calls or challenge reads."""
+"""Billing and provider checks with mocked APIs."""
 
 import copy
 from concurrent.futures import ThreadPoolExecutor

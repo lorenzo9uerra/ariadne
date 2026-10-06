@@ -1,9 +1,6 @@
-"""The Docker host that runs the sandboxes: the local engine or a remote VM over SSH.
+"""Use the active Docker context for local or SSH-hosted sandboxes.
 
-The harness always runs on the evaluation host. Docker commands follow the
-active Docker context, so a context with an ``ssh://`` endpoint sends every
-container operation to a remote VM while logs, ledgers and credentials stay
-local.
+Logs, spending records and credentials remain on the evaluation host.
 """
 
 import contextlib
@@ -42,9 +39,7 @@ def docker_architecture() -> str:
 def select_platform(required: str) -> str:
     """Set SANDBOX_PLATFORM for a package, refusing to emulate another architecture.
 
-    Emulation is refused because it is slow and breaks debuggers that many
-    binary challenges need; such packages use a Docker host of their own
-    architecture instead.
+    Emulation can break debuggers used by binary tasks.
     """
     host = docker_architecture()
     if required not in ("any", host):
@@ -87,12 +82,7 @@ def image_inputs() -> list[Path]:
 
 
 def image_tag(platform: str) -> str:
-    """A tag that changes whenever any input of the shared image changes.
-
-    Compose reuses an existing image with this tag instead of rebuilding it for
-    every attempt, and a changed input yields a new tag, so an outdated image
-    is never reused.
-    """
+    """Derive the shared image tag from its platform and build inputs."""
     digest = hashlib.sha256(platform.encode())
     for path in image_inputs():
         digest.update(str(path.relative_to(SANDBOX_DIR)).encode() + b"\0")
@@ -101,11 +91,7 @@ def image_tag(platform: str) -> str:
 
 
 def ensure_image(platform: str) -> str:
-    """Build the shared image on the active Docker host only if its tag is missing.
-
-    Building once per host and input change keeps each
-    attempt's start fast and never reuses an image built from older inputs.
-    """
+    """Build the shared image on the active Docker host if its tag is missing."""
     name = f"ariadne-sandbox:{image_tag(platform)}"
     present = subprocess.run(
         ["docker", "image", "inspect", name], capture_output=True, timeout=30

@@ -1,4 +1,4 @@
-"""Admission checks for pwn-01, without displaying challenge or solver contents."""
+"""Admission checks for pwn-01."""
 
 import hashlib
 import json

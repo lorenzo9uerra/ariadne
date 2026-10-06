@@ -1,8 +1,4 @@
-"""Flag-package plumbing tested with opaque synthetic records.
-
-These checks verify runner behavior, not the correctness or solvability of
-any real challenge.
-"""
+"""Flag package and runner checks with synthetic records."""
 
 import asyncio
 import hashlib
