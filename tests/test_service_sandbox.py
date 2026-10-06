@@ -13,7 +13,6 @@ from harbor.models.task.config import NetworkPolicy
 from harbor.models.task.task import Task
 
 from benchmark.packages import ROOT, load_package
-from benchmark.runner import run_trial
 from benchmark.tasks import (
     configure_service_environment,
     prepare_trial_instance,
@@ -21,7 +20,7 @@ from benchmark.tasks import (
 )
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import AriadneDockerEnvironment
-from tests.support import native_flag_task
+from tests.support import native_flag_task, run_trial
 
 DOCKER = pytest.mark.skipif(
     os.environ.get("RUN_DOCKER") != "1", reason="Unpaid Docker integration"

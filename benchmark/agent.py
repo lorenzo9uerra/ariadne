@@ -31,6 +31,7 @@ from benchmark.packages import ROOT, package_path
 from benchmark.policy import Monitor, PolicyStopped, Session, execute_benchmark_tools
 from benchmark.reviewers import live_monitor
 from benchmark.web import web_fetch, web_search
+from sandbox.container import script
 from sandbox.environment import SUBMISSION_BYTES, AriadneDockerEnvironment
 
 PROMPT = Path(__file__).with_name("prompts") / "agent.txt"
@@ -52,31 +53,7 @@ def render_prompt(budgets: dict, web_enabled: bool) -> str:
     )
 
 
-# Drain both pipes while retaining only limit+1 bytes per stream. This bounds
-# retained data before Docker transports it, even if the command floods stdout.
-# Command text is passed as one positional argument, never interpolated here.
-CAPTURE = r"""
-set -u
-limit="$2"
-directory=$(mktemp -d /tmp/output.XXXXXXXX)
-trap 'rm -rf "$directory"' EXIT
-mkfifo "$directory/out.pipe" "$directory/err.pipe"
-capture() {
-    { head -c "$((limit + 1))"; cat >/dev/null; } < "$1" > "$2"
-}
-capture "$directory/out.pipe" "$directory/out" & out_pid=$!
-capture "$directory/err.pipe" "$directory/err" & err_pid=$!
-/bin/bash --noprofile --norc -c "$1" > "$directory/out.pipe" 2> "$directory/err.pipe"
-status=$?
-wait "$out_pid" "$err_pid"
-printf '%s\n' "$status"
-wc -c < "$directory/out"
-wc -c < "$directory/err"
-head -c "$limit" "$directory/out" | base64 -w0
-printf '\n'
-head -c "$limit" "$directory/err" | base64 -w0
-printf '\n'
-"""
+CAPTURE = script("capture.sh")
 
 
 def decode_capture(text: str, limit: int) -> dict:

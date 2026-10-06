@@ -24,10 +24,6 @@ def exporter(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     config = tmp_path / "tools.env"
-    config.write_text(
-        "DECOMPILE_SECONDS=1\nDECOMPILE_OUTPUT_BYTES=256\n"
-        "DECOMPILE_FUNCTION_SECONDS=1\nGHIDRA_HEAP=384m\nGHIDRA_DIRECTORY=synthetic\n"
-    )
     binary = tmp_path / "binary with spaces"
     binary.write_bytes(b"Synthetic input; never executed.")
     fake = tmp_path / "analyzeHeadless"
@@ -44,7 +40,12 @@ def exporter(tmp_path, monkeypatch):
         lambda **kwargs: real_temporary(prefix=kwargs["prefix"], dir=tmp_path),
     )
 
-    def behavior(code):
+    def behavior(code, seconds=10):
+        # Generous by default: the fake tool's own start-up must never hit it.
+        config.write_text(
+            f"DECOMPILE_SECONDS={seconds}\nDECOMPILE_OUTPUT_BYTES=256\n"
+            "DECOMPILE_FUNCTION_SECONDS=1\nGHIDRA_HEAP=384m\nGHIDRA_DIRECTORY=synthetic\n"
+        )
         fake.write_text(
             f"#!{sys.executable}\n"
             "import os, sys, time\nfrom pathlib import Path\n"
@@ -98,7 +99,7 @@ def test_exporter_reports_missing_function(exporter, capfd):
 
 def test_exporter_deadline_stops_process_and_cleans_workspace(exporter, capfd):
     module, binary = exporter(
-        "print('synthetic analysis started', flush=True)\ntime.sleep(60)\n"
+        "print('synthetic analysis started', flush=True)\ntime.sleep(60)\n", seconds=1
     )
     started = time.monotonic()
     assert module.run(binary, "") == 1
@@ -118,9 +119,8 @@ def test_analysis_tools_through_docker(tmp_path):
     import shlex
 
     from benchmark.packages import Package
-    from benchmark.runner import run_trial
     from sandbox.docker_host import ensure_image, select_platform
-    from tests.support import SAFE, assert_isolation_and_cleanup, export_task
+    from tests.support import SAFE, assert_isolation_and_cleanup, export_task, run_trial
 
     platform = select_platform("any")
     source = tmp_path / "probe.c"

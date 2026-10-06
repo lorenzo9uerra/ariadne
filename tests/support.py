@@ -15,6 +15,13 @@ import httpx
 import yaml
 from harbor.models.task.config import TaskConfig
 from harbor.models.task.task import Task
+from harbor.models.trial.config import (
+    AgentConfig,
+    EnvironmentConfig,
+    TrialConfig,
+)
+from harbor.models.trial.config import TaskConfig as TrialTaskConfig
+from harbor.trial.trial import Trial
 
 from benchmark.answers import parse_answer
 from benchmark.budgets import load_draft
@@ -100,6 +107,35 @@ def dispatch(
         call_id, name, arguments or {"url": "https://example.org/reference"}
     )
     return run_calls(s, [proposal], tools or web_tools(s, backend))[0]
+
+
+async def run_trial(
+    task: Path,
+    log_dir: Path,
+    submission: str | None,
+    commands=None,
+    command_timeout=None,
+    use_trial_target=False,
+):
+    config = TrialConfig(
+        task=TrialTaskConfig(path=task),
+        trials_dir=log_dir,
+        agent=AgentConfig(
+            import_path="benchmark.agent:ScriptedAgent",
+            kwargs={
+                "submission": submission,
+                "commands": commands,
+                "command_timeout": command_timeout,
+                "use_trial_target": use_trial_target,
+            },
+        ),
+        environment=EnvironmentConfig(
+            import_path="sandbox.environment:AriadneDockerEnvironment"
+        ),
+    )
+    trial = await Trial.create(config)
+    result = await trial.run()
+    return result, trial.paths.trial_dir
 
 
 # Synthetic tasks and the Docker boundary.

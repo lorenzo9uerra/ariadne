@@ -20,7 +20,7 @@ from harbor.models.trial.result import TrialResult
 from benchmark.agent import LiveAgent, decode_capture, parse_calls
 from benchmark.budgets import load_draft
 from benchmark.packages import ROOT
-from benchmark.runner import run_live
+from benchmark.runner import agent_config, run_job
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import AriadneDockerEnvironment
 from tests.support import (
@@ -404,7 +404,11 @@ def test_mocked_reviewed_web_through_native_job(tmp_path, live_mock, reviewed_we
             completion([api_call("submit", {"answer": SAFE})]),
         ]
     )
-    result, folder = asyncio.run(run_live(task, tmp_path / "jobs", "web", dev=True))
+    result, folder = asyncio.run(
+        run_job(
+            task, tmp_path / "jobs", agent_config("live", condition="web"), dev=True
+        )
+    )
     assert result.stats.n_errored_trials == 0
     path = next(folder.glob("*/result.json"))
     trial = TrialResult.model_validate_json(path.read_text())
@@ -637,7 +641,9 @@ def test_mocked_live_agent_through_native_job(tmp_path, live_mock, case):
             )
         )
         replies.append(completion([api_call("submit", {"answer": WRONG})]))
-    result, folder = asyncio.run(run_live(task, tmp_path / "jobs", dev=True))
+    result, folder = asyncio.run(
+        run_job(task, tmp_path / "jobs", agent_config("live"), dev=True)
+    )
     assert result.stats.n_errored_trials == 0
     path = next(folder.glob("*/result.json"))
     trial = TrialResult.model_validate_json(path.read_text())
@@ -697,7 +703,9 @@ def test_mocked_agent_output_bounds_and_timeout_cleanup(tmp_path, live_mock):
         ensure_image(platform),
         platform,
     )
-    result, folder = asyncio.run(run_live(task, tmp_path / "jobs", dev=True))
+    result, folder = asyncio.run(
+        run_job(task, tmp_path / "jobs", agent_config("live"), dev=True)
+    )
     assert result.stats.n_errored_trials == 0
     path = next(folder.glob("*/result.json"))
     trajectory = Trajectory.model_validate_json(

@@ -15,7 +15,6 @@ from harbor.models.trial.paths import TrialPaths
 
 from benchmark.agent import ScriptedAgent
 from benchmark.answers import METRICS, score_fields
-from benchmark.runner import run_trial
 from benchmark.verifier import grade
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import (
@@ -28,6 +27,7 @@ from tests.support import (
     WRONG,
     assert_isolation_and_cleanup,
     export_task,
+    run_trial,
     synthetic_package,
 )
 
