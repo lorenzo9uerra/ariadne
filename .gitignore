@@ -16,7 +16,7 @@ __pycache__/
 /logs/
 /jobs/
 
-# Corresponding GNU libc source staged for a public release, not Git history
+# Local copies of third-party source archives
 /tasks/pwn-01/private/glibc-source/
 
 # Operating-system metadata

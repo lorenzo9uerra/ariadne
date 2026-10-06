@@ -23,11 +23,8 @@ SHA256: 382725d4aa4190794f492402a23338c61054e87b9128cf7e8410ce5a9511eb01
 https://snapshot.ubuntu.com/ubuntu/20250401T000000Z/pool/main/g/glibc/glibc_2.35-0ubuntu3.9.dsc
 SHA256: bcdcbf3ce328bec5f612020ab39ffa2bb473cd4e5989c0543e22466a3acee355
 
-These links identify the source; they are not a written source offer.
-A hash-verified copy of the three archives is staged locally at
-private/glibc-source/. That directory is gitignored so the archives do not
-enter Git history. Before publishing the bundled binaries, attach that bundle
-to the same release, as required by COPYING.LIB section 4.
+Download these source files from the v0.1.0 release:
+https://github.com/lorenzo9uerra/ariadne/releases/tag/v0.1.0
 Keep this notice and the license with redistributed copies.
 
 --- Ubuntu libc6 package copyright notice (verbatim) ---
