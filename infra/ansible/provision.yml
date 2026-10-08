@@ -14,6 +14,7 @@
     - tests/test_flag_packages.py::test_two_fresh_flag_trials_through_native_harbor
     - tests/test_flag_packages.py::test_native_job_repetitions_generate_independent_flag_instances
     - tests/test_service_sandbox.py::test_service_access_fresh_flags_and_separate_grading
+    - tests/test_service_sandbox.py::test_service_trials_cannot_connect_to_each_other
     - tests/test_service_sandbox.py::test_service_readiness_failure_prevents_agent_execution_and_cleans_up
     - tests/test_sandbox_tools.py::test_analysis_tools_through_docker
 

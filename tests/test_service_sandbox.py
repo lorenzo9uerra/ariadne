@@ -13,6 +13,7 @@ import yaml
 from harbor.models.task.config import NetworkPolicy
 from harbor.models.task.task import Task
 
+from benchmark.agent import ScriptedAgent
 from benchmark.answers import reward_values
 from benchmark.packages import ROOT, load_package
 from benchmark.tasks import (
@@ -20,6 +21,7 @@ from benchmark.tasks import (
     prepare_trial_instance,
     read_trial_instance,
 )
+from sandbox.checks import inspect_docker
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import AriadneDockerEnvironment
 from tests.support import native_flag_task, run_trial
@@ -269,6 +271,81 @@ def test_service_access_fresh_flags_and_separate_grading(tmp_path):
         assert agent["checks"]["target_network_denials"]
         assert agent["workspace_hashes_verified"]
     assert targets[0] != targets[1]
+
+
+@DOCKER
+def test_service_trials_cannot_connect_to_each_other(tmp_path, monkeypatch):
+    platform = select_platform("any")
+    task = synthetic_service(tmp_path, ensure_image(platform), platform)
+    original_run = ScriptedAgent.run
+
+    async def paired_trials():
+        environments = []
+        ready = asyncio.Event()
+        checked = asyncio.Event()
+        completed_probes = []
+
+        async def check_connections(self, instruction, environment, context):
+            assert isinstance(environment, AriadneDockerEnvironment)
+            environments.append(environment)
+            if len(environments) == 2:
+                ready.set()
+            await asyncio.wait_for(ready.wait(), timeout=120)
+            other = next(item for item in environments if item is not environment)
+            details = await asyncio.to_thread(
+                inspect_docker, "container", other.target_id
+            )
+            address = next(iter(details["NetworkSettings"]["Networks"].values()))[
+                "IPAddress"
+            ]
+            assert address
+            script = (
+                "import socket\n"
+                "with socket.create_connection(('target', 4000), timeout=2): pass\n"
+                "try:\n"
+                f"    connection = socket.create_connection(({address!r}, 4000), timeout=2)\n"
+                "except OSError:\n"
+                "    pass\n"
+                "else:\n"
+                "    connection.close()\n"
+                "    raise AssertionError('Another trial is reachable')\n"
+            )
+            for service in ("main", "target"):
+                probe = await environment.service_exec(
+                    "python3 -I -c " + shlex.quote(script),
+                    service=service,
+                    user="1000:1000",
+                    timeout_sec=10,
+                )
+                assert probe.return_code == 0, probe.stderr
+                completed_probes.append((environment.container_id, service))
+            if len(completed_probes) == 4:
+                checked.set()
+            # Keep both services alive until every connection check finishes.
+            await asyncio.wait_for(checked.wait(), timeout=30)
+            await original_run(self, instruction, environment, context)
+
+        monkeypatch.setattr(ScriptedAgent, "run", check_connections)
+        results = await asyncio.gather(
+            *(
+                run_trial(
+                    task,
+                    tmp_path / "trials",
+                    None,
+                    commands=[],
+                    use_trial_target=True,
+                )
+                for _ in range(2)
+            )
+        )
+        assert len(set(completed_probes)) == 4
+        return results
+
+    for result, path in asyncio.run(paired_trials()):
+        assert result.exception_info is None
+        assert result.verifier_result is not None
+        assert result.verifier_result.rewards == reward_values({"flag_correct": 1})
+        assert_service_cleanup(path)
 
 
 @DOCKER

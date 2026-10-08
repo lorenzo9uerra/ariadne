@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="548" viewBox="0 0 500 548" role="img" aria-labelledby="title description">
+  <title id="title">Ariadne architecture</title>
+  <desc id="description">The evaluation host runs Harbor, the agent loop, tool checks and the web reviewer. The Docker host runs separate agent, verifier and optional service containers. After removing the agent, the host supplies the verifier with the submission and expected answer. Containers have no internet access or host mounts.</desc>
+  <style>
+    text { fill: #e6edf3; font: 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+    .title { font-size: 20px; font-weight: 600; }
+    .note { font-size: 16px; }
+    .paper { fill: #0d1117; }
+    .host { fill: #0d1117; stroke: #8b949e; stroke-width: 1.5; }
+    .container { fill: #161b22; stroke: #8b949e; stroke-width: 1.5; }
+    .arrow { fill: none; stroke: #8b949e; stroke-width: 1.5; }
+    .tip { fill: #8b949e; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path class="tip" d="M 0 0 L 10 5 L 0 10 Z"/>
+    </marker>
+  </defs>
+  <rect class="paper" width="500" height="548"/>
+
+  <text class="title" x="131" y="28">Model API</text>
+  <text class="title" x="369" y="28">Public web</text>
+
+  <rect class="host" x="12" y="64" width="476" height="144" rx="6"/>
+  <rect class="paper" x="163" y="52" width="174" height="26"/>
+  <text class="title" x="250" y="73">Evaluation host</text>
+  <path class="arrow" d="M 131 109 V 44" marker-end="url(#arrow)"/>
+  <path class="arrow" d="M 369 109 V 44" marker-end="url(#arrow)"/>
+  <text x="131" y="132">Harbor + agent loop</text>
+  <text x="369" y="132">Web tools + reviewer</text>
+  <path class="arrow" d="M 225 125 H 275" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="250" y="167">Tool checks</text>
+  <text x="250" y="192">Expected answers, API keys, records</text>
+
+  <rect class="host" x="12" y="274" width="476" height="260" rx="6"/>
+  <rect class="paper" x="181" y="262" width="138" height="26"/>
+  <text class="title" x="250" y="283">Docker host</text>
+  <path class="arrow" d="M 131 213 V 300" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <rect class="paper" x="43" y="230" width="176" height="26"/>
+  <text x="131" y="249">commands / outputs</text>
+  <path class="arrow" d="M 369 213 V 300" marker-end="url(#arrow)"/>
+  <rect class="paper" x="279" y="217" width="180" height="48"/>
+  <text x="369" y="235">submission</text>
+  <text x="369" y="258">+ expected answer</text>
+
+  <rect class="container" x="28" y="300" width="206" height="56" rx="4"/>
+  <text class="title" x="131" y="335">Agent container</text>
+
+  <rect class="container" x="266" y="300" width="206" height="56" rx="4"/>
+  <text class="title" x="369" y="335">Verifier container</text>
+
+  <path class="arrow" d="M 131 356 V 428" marker-end="url(#arrow)"/>
+  <rect class="paper" x="64" y="378" width="134" height="26"/>
+  <text x="131" y="397">service traffic</text>
+  <rect class="container" x="28" y="428" width="206" height="70" rx="4"/>
+  <text class="title" x="131" y="457">Target container</text>
+  <text class="note" x="131" y="481">(service tasks only)</text>
+  <text class="note" x="250" y="522">(containers: no internet or host mounts)</text>
+</svg>
