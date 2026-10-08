@@ -17,13 +17,15 @@ Docker host, which is either the same machine or a remote VM. When the agent
 submits, its container is removed and a fresh verifier container grades the
 answer.
 
-<a href="docs/architecture.svg">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/architecture.svg">
-    <img alt="Ariadne architecture: evaluation host and separate Docker containers" src="docs/architecture.svg" width="500">
-  </picture>
-</a>
+<p align="center">
+  <a href="docs/architecture.svg">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="docs/architecture.svg">
+      <img alt="Ariadne architecture: evaluation host and separate Docker containers" src="docs/architecture.svg" width="500">
+    </picture>
+  </a>
+</p>
 
 - **Tasks.** Each challenge is a native Harbor task in `tasks/<id>/`, with its
   instruction, environment, verifier and a `private/` directory for ground
