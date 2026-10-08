@@ -17,6 +17,8 @@ import yaml
 from harbor.job import Job
 from harbor.models.job.config import JobConfig
 from harbor.models.trial.result import TrialResult
+from harbor.utils.logger import logger as harbor_logger
+from rich.logging import RichHandler
 
 from benchmark.answers import (
     answer_metrics,
@@ -35,6 +37,28 @@ DISPOSITIONS = {
     "implementation_fault",
     "pending",
 }
+
+
+async def create_job(config: JobConfig) -> Job:
+    """Keep Harbor's console messages aligned with its progress display."""
+    job = await Job.create(config)
+    previous = job._console_handler
+    if previous is not None:
+        handler = RichHandler(
+            level=previous.level,
+            show_time=False,
+            show_level=False,
+            show_path=False,
+            markup=False,
+            keywords=[],
+        )
+        handler.setFormatter(previous.formatter)
+        harbor_logger.removeHandler(previous)
+        previous.close()
+        harbor_logger.addHandler(handler)
+        # Harbor closes this handler when the job ends.
+        job._console_handler = handler
+    return job
 
 
 def metrics(item: dict) -> tuple[str, ...]:
@@ -331,7 +355,7 @@ async def execute_job(
             )
 
     try:
-        job = await Job.create(config)
+        job = await create_job(config)
         job.on_trial_started(started)
         await (
             job.run()

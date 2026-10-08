@@ -56,6 +56,7 @@ def harness(tmp_path, monkeypatch):
         def __init__(self, config):
             self.config = config
             self.callback = None
+            self._console_handler = None
 
         @classmethod
         async def create(cls, config):

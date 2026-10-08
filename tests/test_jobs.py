@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+import logging
 import os
 import shlex
+from io import StringIO
 
 import httpx
 import pytest
@@ -13,11 +15,15 @@ from harbor.job import Job
 from harbor.models.job.config import JobConfig
 from harbor.models.task.task import Task
 from harbor.models.trial.result import TrialResult
+from harbor.utils.logger import logger as harbor_logger
 from harbor.viewer.server import create_app
+from rich.console import Console, Group
+from rich.live import Live
+from rich.progress import Progress
 
 from benchmark.agent import LiveAgent
 from benchmark.budgets import load_draft
-from benchmark.experiment import job_config
+from benchmark.experiment import create_job, job_config
 from benchmark.packages import ROOT
 from benchmark.runner import agent_config
 from sandbox.docker_host import ensure_image, select_platform
@@ -27,6 +33,66 @@ from tests.support import (
     export_task,
     synthetic_package,
 )
+
+
+def test_console_errors_redraw_progress_and_keep_file_logs(tmp_path, monkeypatch):
+    config = job_config(
+        tmp_path / "task", tmp_path, {"name": "nop"}, name="console-check", dev=True
+    )
+    config.debug = True
+    job = object.__new__(Job)
+    job.config = config
+    job.is_resuming = False
+    job.job_dir.mkdir()
+    job._init_logger()
+    original = job._console_handler
+
+    async def prepared(config):
+        return job
+
+    sink = StringIO()
+    console = Console(
+        file=sink,
+        force_terminal=True,
+        force_interactive=True,
+        width=100,
+        _environ={"TERM": "xterm-256color"},
+    )
+    monkeypatch.setattr(Job, "create", prepared)
+    monkeypatch.setattr("rich.logging.get_console", lambda: console)
+    try:
+        assert asyncio.run(create_job(config)) is job
+        assert job._console_handler is not None
+        assert job._console_handler.level == logging.DEBUG
+        assert original not in harbor_logger.handlers
+        overall = Progress(console=console)
+        current = Progress(console=console)
+        with Live(
+            Group(overall, current),
+            console=console,
+            auto_refresh=False,
+            redirect_stdout=False,
+            redirect_stderr=False,
+        ) as live:
+            task = overall.add_task("Running trials...", total=1)
+            active = current.add_task("Synthetic agent", total=None)
+            live.refresh()
+            before = len(sink.getvalue())
+            job._logger.error("Synthetic download error")
+            rendered = sink.getvalue()[before:]
+            # Clear both progress rows before printing, then redraw them below.
+            assert rendered.startswith("\r\x1b[2K\x1b[1A\x1b[2K")
+            assert "Synthetic download error" in rendered
+            assert "Running trials..." in rendered
+            current.remove_task(active)
+            overall.advance(task)
+        retained = (job.job_dir / "job.log").read_text()
+        assert "Synthetic download error" in retained
+        handler = job._console_handler
+    finally:
+        job._close_logger_handlers()
+    assert handler not in harbor_logger.handlers
+    assert job._console_handler is None
 
 
 @pytest.mark.parametrize("dev", [False, True])

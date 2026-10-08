@@ -7,12 +7,11 @@ import os
 import subprocess
 from pathlib import Path
 
-from harbor.job import Job
 from harbor.models.trial.result import TrialResult
 
 from benchmark.answers import is_success
 from benchmark.budgets import load_draft
-from benchmark.experiment import job_config, run_experiment
+from benchmark.experiment import create_job, job_config, run_experiment
 from benchmark.oracle import redact
 from benchmark.packages import ROOT, Package, load_package
 from sandbox.docker_host import ensure_image, select_platform
@@ -54,7 +53,7 @@ def agent_config(
 
 async def run_job(task: Path, jobs_dir: Path, agent: dict, *, dev=False):
     config = job_config(task, jobs_dir, agent, dev=dev)
-    job = await Job.create(config)
+    job = await create_job(config)
     return await job.run(), config.jobs_dir / config.job_name
 
 
