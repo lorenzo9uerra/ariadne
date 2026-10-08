@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import subprocess
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -161,6 +162,72 @@ def assert_service_cleanup(path, verifier=True):
             )
             assert inspected.returncode != 0
     return records
+
+
+@DOCKER
+def test_target_seccomp_profile_is_transported_and_verified(tmp_path):
+    platform = select_platform("any")
+    if platform != "linux/amd64":
+        pytest.skip("The target profile declares the AMD64 syscall architecture")
+    image = ensure_image(platform)
+    # Exercise Compose transport without a challenge, solver or image build.
+    data = (ROOT / "tasks/pwn-02/service/seccomp.json").read_bytes()
+    profile = tmp_path / "seccomp.json"
+    profile.write_bytes(data)
+    definition = tmp_path / "compose.yaml"
+    definition.write_text(
+        yaml.safe_dump(
+            {
+                "services": {
+                    "target": {
+                        "image": image,
+                        "pull_policy": "never",
+                        "command": ["python3", "-c", "import time; time.sleep(3600)"],
+                        "network_mode": "none",
+                        "user": "1000:1000",
+                        "read_only": True,
+                        "cap_drop": ["ALL"],
+                        "security_opt": [
+                            "no-new-privileges:true",
+                            f"seccomp={profile.resolve()}",
+                        ],
+                    }
+                }
+            }
+        )
+    )
+    command = [
+        "docker",
+        "compose",
+        "--project-name",
+        f"seccomp-check-{uuid4().hex[:12]}",
+        "-f",
+        str(definition),
+    ]
+    try:
+        subprocess.run(
+            [*command, "up", "--detach"], check=True, capture_output=True, timeout=60
+        )
+        identifier = subprocess.check_output(
+            [*command, "ps", "-q", "target"], text=True, timeout=30
+        ).strip()
+        details = json.loads(
+            subprocess.check_output(
+                ["docker", "container", "inspect", identifier], timeout=30
+            )
+        )[0]
+        environment = object.__new__(AriadneDockerEnvironment)
+        environment._target_seccomp_profile = json.loads(data)
+        assert details["State"]["Running"]
+        assert environment._target_seccomp_applied(details)
+        assert "no-new-privileges:true" in details["HostConfig"]["SecurityOpt"]
+    finally:
+        subprocess.run(
+            [*command, "down", "--volumes", "--remove-orphans"],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
 
 
 @DOCKER

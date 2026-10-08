@@ -2,6 +2,7 @@
 
 import hashlib
 import shutil
+import tomllib
 
 import pytest
 from harbor.models.task.task import Task
@@ -14,6 +15,12 @@ def test_all_tasks_use_native_definitions_and_separate_verifier():
     paths = sorted((ROOT / "tasks").glob("*/task.toml"))
     assert paths
     for path in paths:
+        manifest = tomllib.loads(path.read_text())["metadata"]["ariadne"]
+        if manifest.get("status", "ready") != "ready":
+            Task(path.parent)
+            with pytest.raises(ValueError, match="admission is pending"):
+                load_package(path.parent)
+            continue
         package = load_package(path.parent)
         task = Task(path.parent)
         assert task.config.metadata["ariadne"] == package.manifest
@@ -47,6 +54,9 @@ def test_all_tasks_use_native_definitions_and_separate_verifier():
 def test_ready_reviewer_contexts_validate_without_exposing_their_contents():
     errors = []
     for path in sorted((ROOT / "tasks").glob("*/task.toml")):
+        manifest = tomllib.loads(path.read_text())["metadata"]["ariadne"]
+        if manifest.get("status", "ready") != "ready":
+            continue
         package = load_package(path.parent)
         if package.manifest.get("reviewer_context_status") == "ready":
             try:

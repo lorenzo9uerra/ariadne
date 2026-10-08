@@ -1,0 +1,67 @@
+# Reference: https://github.com/project-sekai-ctf/konata
+challenges:
+  - category: pwn
+    name: ppp
+    author: Marc
+    description: |
+      *insert your typical "you might need a 0day for this" description*
+
+      > [!NOTE]
+      > This is a 0day challenge and we are hoping you keep th{is|ese} 0day{|s} to yourself until the vulnerabilit{y|ies} {is|are} patched.
+    tags:
+      - ⭐
+      - 0day
+    attachments:
+      files:
+        - "handout/"
+      stripComponents: 1
+    flags:
+      rctf:
+        file: challenge/flag.txt
+    endpoints:
+      - type: nc
+        endpoint: "{{ challenge.name | lower }}.{{ config.domains['static'] }}"
+        port: 1337
+
+deployment:
+  images:
+    - path: challenge
+      name: "{{ challenges[0].name | lower }}"
+      tag: latest
+      registryName: challenges
+      platform: linux/amd64
+
+  kubernetesInlineManifests:
+    - clusterName: main
+      documents:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: '{{ challenges[0].name | lower }}'
+        - apiVersion: sctf.es3n1n.io/v1alpha1
+          kind: Challenge
+          metadata:
+            name: "{{ challenges[0].name | lower }}"
+            namespace: "{{ challenges[0].name | lower }}"
+          spec:
+            releaseTime: "2026-06-27T08:00:00Z"
+            pods:
+              - name: challenge
+                replicas: 1
+                spec:
+                  containers:
+                    - name: challenge
+                      image: "{{ images[challenges[0].name | lower] }}"
+                      ports:
+                        - containerPort: 5000
+                      resources:
+                        requests: { cpu: 25m, memory: 64Mi }
+                        limits: { cpu: 2, memory: 2Gi }
+                      securityContext:
+                        privileged: true
+                exposed:
+                  - protocol: TCP
+                    subdomain: "{{ challenges[0].name | lower }}"
+                    port: 1337
+                    targetPort: 5000
+                    proxyProtocol: true

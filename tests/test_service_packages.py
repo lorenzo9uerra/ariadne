@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmark.packages import ROOT, load_package
+from benchmark.packages import ROOT, load_package, validate_target_seccomp
 from benchmark.tasks import load_config, prepare_service, target_limits
 
 FIXTURE = ROOT / "tests" / "fixtures" / "service-01"
@@ -43,6 +43,23 @@ def test_package_can_raise_one_service_limit_without_changing_the_others():
     assert limits["cpus"] == 1.0
     assert limits["memory_bytes"] == protocol["service_sandbox"]["memory_bytes"]
     assert limits["pids"] == protocol["service_sandbox"]["pids"]
+
+
+def test_target_seccomp_rejects_allow_all_and_missing_personality(tmp_path):
+    service = tmp_path / "service"
+    service.mkdir()
+    profile = service / "seccomp.json"
+    declared = {"service/seccomp.json": "x"}
+    profile.write_text('{"defaultAction": "SCMP_ACT_ALLOW", "syscalls": []}\n')
+    with pytest.raises(ValueError, match="deny-by-default"):
+        validate_target_seccomp(
+            tmp_path, {"target_seccomp": "service/seccomp.json"}, declared
+        )
+    profile.write_text('{"defaultAction": "SCMP_ACT_ERRNO", "syscalls": []}\n')
+    with pytest.raises(ValueError, match="ADDR_NO_RANDOMIZE"):
+        validate_target_seccomp(
+            tmp_path, {"target_seccomp": "service/seccomp.json"}, declared
+        )
 
 
 def test_unknown_service_limit_is_rejected():
