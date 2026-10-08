@@ -96,7 +96,6 @@ original_sha256 = "10570b5c2ba3040b9bd093616eacc6ae653447c11d415ddc72a69e8fc725f
 pending = [
   "Pin the Ubuntu 20.04 image digest and freeze libtatsu after the first successful image build.",
   "Review the player description.",
-  "Publish the matching libc source bundle alongside the handout before redistributing the binary.",
 ]
 
 [verifier.environment.env]

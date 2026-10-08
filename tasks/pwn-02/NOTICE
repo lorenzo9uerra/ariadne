@@ -6,15 +6,15 @@ Ariadne's shared harness and verifier remain under the repository MIT license.
 
 The handout includes GNU libc 2.31-0ubuntu9.18. Preserve COPYING.LIB and
 LIBC-NOTICES and provide its corresponding source when distributing it.
-Corresponding source files to attach to the Ariadne release:
+Corresponding source files are available in the v0.1.1 release:
+https://github.com/lorenzo9uerra/ariadne/releases/tag/v0.1.1
 
   glibc_2.31.orig.tar.xz
   SHA256 2b22c7b04a36747d6c74796a73193a6f8856bfd1efc551b5db96baefa053fe5e
   glibc_2.31-0ubuntu9.18.debian.tar.xz
   SHA256 958d60a6e4f212f6438862b2ac2a4c45eca75891b5dc1894f62053cc775d2ea3
-
   glibc_2.31-0ubuntu9.18.dsc
   SHA256 b21e6952f2bb957d2c8bae40485ad94b1f6fb539b91bb3ceedce3af4a6340f13
 
 Source origin: https://archive.ubuntu.com/ubuntu/pool/main/g/glibc/
-Publishing the corresponding source bundle remains an admission item.
+Keep this notice and the licenses with redistributed copies.
