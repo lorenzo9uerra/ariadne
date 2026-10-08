@@ -234,7 +234,8 @@ def test_token_estimate_accepts_literal_special_token_text():
 
 
 @pytest.mark.parametrize(
-    "model_id", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"]
+    "model_id",
+    ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash", "z-ai/glm-5.3"],
 )
 def test_reasoning_profile_request_and_billing(model_factory, model_id):
     config = load_draft(model=model_id)

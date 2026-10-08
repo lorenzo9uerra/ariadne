@@ -210,11 +210,13 @@ The first comparison uses these profiles, with reasoning enabled:
 | --- | --- | --- |
 | `mistralai/mistral-large-4-0` | Mistral | $0.68 / $2.09 |
 | `qwen/qwen3.8-flash` | Alibaba | $0.15 / $0.47 |
+| `z-ai/glm-5.3` | Novita (FP8) | $0.70 / $2.20 |
 
-These rates were verified on 6 October 2026. Mistral's prices already include
+Mistral and Qwen's rates were verified on 6 October 2026, and GLM's on 8 October.
+GLM's rates include Novita's 50% discount. Mistral's prices already include
 the current **50% launch discount**, listed on
 [OpenRouter](https://openrouter.ai/collections/discounted-models).
-Choose the same task subset for both models before running them, and check eligibility under
+Choose the same task subset for all models before running them, and check eligibility under
 [protocol section 8.3](docs/benchmark_protocol.md#83-benchmark-and-development-challenges)
 before treating the comparison as a counted benchmark. The examples below start
 with one task on an x86-64 VM. Replace `ariadne-benchmark-vm` with your VM's
@@ -386,6 +388,10 @@ possible escape; the [security design](docs/security_principles.md) explains
 the remaining gaps.
 
 ## Development and testing
+
+GitHub Actions runs the following checks on pushes to `main` and pull requests,
+using the pinned Python version and dependencies. Docker and paid tests remain
+opt-in and are disabled in CI.
 
 Dependencies and tools are pinned through uv:
 

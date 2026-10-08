@@ -95,7 +95,11 @@ def fingerprint(tasks: list[dict]) -> dict:
         ROOT / "pyproject.toml",
         ROOT / "job.yaml",
     ]
-    files.extend(sorted((ROOT / "benchmark/prompts").glob("*.txt")))
+    files.extend(
+        path
+        for path in sorted((ROOT / "benchmark/prompts").iterdir())
+        if path.is_file() and path.suffix in (".txt", ".json")
+    )
     return {
         "files": {str(path): digest(path) for path in files},
         "tasks": {item["task"]: tree_digest(Path(item["task"])) for item in tasks},
@@ -110,7 +114,7 @@ def implementation() -> dict:
         for path in sorted((ROOT / "sandbox").rglob("*"))
         if path.is_file()
         and (
-            path.suffix in (".java", ".yaml", ".toml", ".lock", ".env")
+            path.suffix in (".sh", ".java", ".yaml", ".toml", ".lock", ".env")
             or path.name in ("Dockerfile", "decompile")
         )
     )

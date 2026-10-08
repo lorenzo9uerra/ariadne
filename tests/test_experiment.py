@@ -45,7 +45,10 @@ def harness(tmp_path, monkeypatch):
     for name in ("job.yaml", "job.dev.yaml"):
         shutil.copyfile(ROOT / name, root / name)
     (root / "benchmark/prompts/agent.txt").write_text("Synthetic prompt.\n")
+    (root / "benchmark/prompts/decision_question.json").write_text("{}\n")
     (root / "benchmark/agent.py").write_text("# Synthetic implementation v1\n")
+    (root / "sandbox/container").mkdir()
+    (root / "sandbox/container/capture.sh").write_text("echo synthetic\n")
     monkeypatch.setattr(experiment, "ROOT", root)
     monkeypatch.setattr(experiment, "reviewer_context", lambda package: {})
     package = synthetic_package(root / "task")
@@ -360,7 +363,10 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
         asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
 
 
-@pytest.mark.parametrize("change", ["task", "prompt", "config", "implementation"])
+@pytest.mark.parametrize(
+    "change",
+    ["task", "prompt", "reviewer_choices", "config", "implementation", "shell"],
+)
 def test_drift_blocks_generation_even_for_replacements(harness, tmp_path, change):
     folder = run(harness, tmp_path, conditions=("offline",))
     row = experiment.report(folder)["attempts"][0]
@@ -375,8 +381,10 @@ def test_drift_blocks_generation_even_for_replacements(harness, tmp_path, change
     paths = {
         "task": harness[0].root / "record.txt",
         "prompt": root / "benchmark/prompts/agent.txt",
+        "reviewer_choices": root / "benchmark/prompts/decision_question.json",
         "config": root / "benchmark/draft.toml",
         "implementation": root / "benchmark/agent.py",
+        "shell": root / "sandbox/container/capture.sh",
     }
     paths[change].write_text("Changed input.\n")
     with pytest.raises(ValueError, match="changed"):

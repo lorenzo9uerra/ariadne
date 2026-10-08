@@ -349,6 +349,10 @@ its charges stay in the ledger even when excluded from benchmark totals.
 Unknown cost or timing stays unknown. Changes to frozen experimental inputs
 require a new experiment.
 
+Shared shell scripts and the reviewer's JSON choice definitions are included
+in the frozen hashes. Plans created before that coverage was added remain
+readable, but cannot resume execution without a new plan.
+
 ## Limits of the current implementation
 
 - The review commands record decisions; they do not check that the admission
