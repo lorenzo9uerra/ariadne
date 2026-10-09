@@ -19,6 +19,7 @@ from benchmark.model import (
     OpenRouterModel,
     error_details,
     input_tokens,
+    pre_inference_rejection,
     retry_after,
 )
 from tests.support import completion
@@ -38,6 +39,8 @@ def model_factory(tmp_path, monkeypatch):
         config = copy.deepcopy(config or load_draft())
         config["live"]["retry_initial_seconds"] = 0
         config["live"]["retry_max_seconds"] = 0
+        config["live"]["rate_limit_retry_initial_seconds"] = 0
+        config["live"]["rate_limit_retry_max_seconds"] = 0
         ledger = Ledger(tmp_path / f"spending-{counter}.sqlite3", 10, attempt_limit)
         audit = AuditTrail(
             "synthetic-run", "synthetic-sample", tmp_path / f"audit-{counter}.jsonl"
@@ -157,6 +160,117 @@ def test_nontransient_error_is_not_retried(model_factory):
     assert model.ledger.totals()["held_usd"] > 0
 
 
+def test_explicit_pool_rejection_does_not_exhaust_spending_or_claim_zero_charge(
+    model_factory,
+):
+    calls = 0
+
+    def reply(request):
+        nonlocal calls
+        if request.method == "GET":
+            return httpx.Response(404)
+        calls += 1
+        if calls <= 3:
+            return httpx.Response(
+                429,
+                json={
+                    "id": f"gen-rejected-{calls}",
+                    "error": {
+                        "code": 429,
+                        "metadata": {"limit_source": "upstream_provider_shared_pool"},
+                    },
+                },
+            )
+        return httpx.Response(200, json=completion())
+
+    model = model_factory(reply, attempt_limit=0.5)
+    generate(model)
+    totals = model.ledger.totals()
+    assert totals["held_usd"] == 0
+    assert totals["expected_unbilled_requests"] == 3
+    assert totals["billed_usd"] == 0.001
+    assert all(
+        e["billing_status"] == "expected_zero_unconfirmed"
+        for e in model.audit.items[:3]
+    )
+
+
+@pytest.mark.parametrize(
+    "defect", ["usage", "choices", "unspecified", "status", "malformed"]
+)
+def test_only_explicit_pre_inference_pool_rejection_qualifies(defect):
+    data = {
+        "error": {
+            "code": 429,
+            "metadata": {"limit_source": "upstream_provider_shared_pool"},
+        }
+    }
+    status = 429
+    if defect == "usage":
+        data["usage"] = {"completion_tokens": 1}
+    if defect == "choices":
+        data["choices"] = [{"message": {"content": "Partial synthetic output"}}]
+    if defect == "unspecified":
+        data["error"]["metadata"] = {}
+    if defect == "status":
+        status = 503
+    if defect == "malformed":
+        data = []
+    assert not pre_inference_rejection(httpx.Response(status, json=data))
+
+
+@pytest.mark.parametrize(
+    ("status", "header", "delays"),
+    [
+        (429, None, [30, 60, 120, 120, 120, 120, 120]),
+        (429, "150", [150] * 7),
+        (503, None, [3, 6, 12, 24, 48, 60, 60]),
+    ],
+)
+def test_backoff_and_optional_attempt_cap(
+    model_factory, monkeypatch, status, header, delays
+):
+    config = load_draft(model="qwen/qwen3.8-flash")
+    assert config["spending"].get("attempt_limit_usd") is None
+    waits = []
+    calls = 0
+
+    async def sleep(delay):
+        waits.append(delay)
+
+    monkeypatch.setattr("benchmark.model.asyncio.sleep", sleep)
+
+    def reply(request):
+        nonlocal calls
+        calls += 1
+        if calls <= 7:
+            return httpx.Response(
+                status, headers={"Retry-After": header} if header else {}
+            )
+        data = completion()
+        data["provider"] = config["live"]["provider_name"]
+        return httpx.Response(200, json=data)
+
+    model = model_factory(reply, config, attempt_limit=None)
+    model.config["live"].update(
+        {key: value for key, value in config["live"].items() if "retry" in key}
+    )
+    generate(model, deadline_seconds=900)
+    assert calls == 8 and waits == delays
+    assert model.ledger.totals()["held_usd"] == 2.881228
+    assert model.ledger.totals()["billed_usd"] == 0.001
+
+
+def test_rate_limit_backoff_does_not_extend_deadline(model_factory):
+    model = model_factory(lambda request: httpx.Response(429), attempt_limit=None)
+    model.config["live"]["rate_limit_retry_initial_seconds"] = 30
+    model.config["live"]["rate_limit_retry_max_seconds"] = 120
+    with pytest.raises(TimeoutError, match="retry backoff"):
+        generate(model, deadline_seconds=20)
+    assert len(model.audit.items) == 1
+    assert model.ledger.totals()["held_usd"] > 0
+
+
 def test_spending_cap_prevents_another_request(model_factory):
     count = 0
 
@@ -235,7 +349,12 @@ def test_token_estimate_accepts_literal_special_token_text():
 
 @pytest.mark.parametrize(
     "model_id",
-    ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash", "z-ai/glm-5.3"],
+    [
+        "mistralai/mistral-large-4-0",
+        "qwen/qwen3.8-flash",
+        "z-ai/glm-5.3",
+        "xiaomi/mimo-v2.6-pro",
+    ],
 )
 def test_reasoning_profile_request_and_billing(model_factory, model_id):
     config = load_draft(model=model_id)
@@ -254,7 +373,9 @@ def test_reasoning_profile_request_and_billing(model_factory, model_id):
         assert body["model"] == model_id
         assert body["provider"]["only"] == [config["live"]["provider"]]
         assert body["reasoning"] == {"enabled": True}
-        assert body["temperature"] == 0.6
+        assert body["temperature"] == (
+            1.0 if model_id == "xiaomi/mimo-v2.6-pro" else 0.6
+        )
         assert body["max_tokens"] == config["budgets"]["agent_max_output_tokens"]
         assert "max_completion_tokens" not in body
         data = completion()

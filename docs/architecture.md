@@ -253,16 +253,29 @@ Every physical model, reviewer and search request reserves its maximum cost in
 `logs/spending.sqlite3` before it is sent. The provider's reported charge then
 settles the reservation. When an API error includes a generation ID, the model
 adapter checks OpenRouter's billing record and settles only a confirmed charge,
-including a confirmed zero. Timeouts, cancellations and unconfirmed charges
-keep the hold. A request that would exceed the optional local allowance or the
-attempt's safety ceiling is not sent. Without a local ceiling, the ledger
+including a confirmed zero. An explicit HTTP 429 rejection from the provider's
+shared pool, with no completion or usage, is recorded as expected unbilled and
+does not retain a spending hold. This is an assumption, not a confirmed zero
+charge: the request and original reservation remain recorded, and cost totals
+are marked incomplete until billing is confirmed. Timeouts, cancellations and
+other unconfirmed failures keep their holds. A request that would exceed an optional local or per-attempt
+ceiling is not sent. Neither ceiling is enabled by default: the OpenRouter key
+enforces the inference spending limit, while the ledger
 records charges and holds but reports no local remaining allowance. No
 credentials enter a container or a trajectory.
+
+The same policy can be applied to retained shared-pool rejections through
+`benchmark.experiment billing-rejections`, with a reviewer and evidence. It
+appends billing corrections to the experiment journal without changing native
+results or outcome reviews. The comparison launcher can continue after these
+rejections, while ambiguous billing still stops dispatch.
 
 API errors retain sanitized diagnostics, correlation IDs and confirmed billing
 records in the private audit. Retries use exponential backoff and honor a valid
 `Retry-After` header; neither a billing lookup nor a retry extends the attempt
-deadline.
+deadline. Agent HTTP 429 retries wait 30, 60, then at most 120 seconds;
+other transient errors retain their configured backoff. Exhausted retries or
+a deadline reached during retrying are provider interruptions requiring review.
 
 Token usage comes from the provider. There is no cumulative token cap: turns,
 tool calls and time end an attempt, and each request must fit the model's
@@ -305,6 +318,13 @@ with three fresh trials each. `benchmark/experiment.py` freezes the settings,
 condition order and input hashes before execution, and refuses to continue if
 those inputs change. Each trial records the framework version it used.
 Harbor's automatic retries are disabled because they discard trial evidence.
+
+A reviewed `benchmark.experiment continue` adopts the current optional attempt
+ceiling and HTTP 429 backoff for replacements. It appends the new configuration
+to the journal, leaving the original plan and completed results intact. Task,
+prompt, route and other execution settings must still match. A project release
+version change can be accepted only when the dependency files otherwise match
+their original hashes; actual dependency changes require a new experiment.
 
 ```text
 frozen plan (tasks, settings, order, seed)

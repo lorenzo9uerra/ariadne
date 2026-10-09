@@ -78,6 +78,7 @@ def test_pinned_upstream_files_match_and_package_loads():
     assert "sandbox_compose" not in manifest  # the shared agent image
     assert manifest["architecture"] == "any"
     assert manifest["status"] == "ready"
+    assert manifest["role"] == "benchmark"
     assert manifest["reviewer_context_status"] == "ready"
     assert manifest["admission"]["pending"] == []
     assert (PACKAGE / "private/secrets.txt").read_text() == ""

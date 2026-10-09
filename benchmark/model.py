@@ -50,6 +50,26 @@ def retry_after(value: str | None) -> float | None:
     return max(0, seconds) if math.isfinite(seconds) else None
 
 
+def pre_inference_rejection(response: httpx.Response) -> bool:
+    """Recognize explicit shared-pool rejection, not an arbitrary HTTP error."""
+    if response.status_code != 429 or len(response.content) > 16384:
+        return False
+    try:
+        data = response.json()
+        return (
+            isinstance(data, dict)
+            and not data.get("choices")
+            and "usage" not in data
+            and isinstance(data.get("error"), dict)
+            and data["error"].get("code") in (429, "429")
+            and isinstance(data["error"].get("metadata"), dict)
+            and data["error"]["metadata"].get("limit_source")
+            == "upstream_provider_shared_pool"
+        )
+    except ValueError:
+        return False
+
+
 def error_details(response: httpx.Response, api_key: str) -> dict:
     """Keep diagnostic fields and correlation IDs, without credentials."""
 
@@ -301,10 +321,21 @@ class OpenRouterModel:
                         entry.update(
                             status="http_error",
                             http_status=response.status_code,
+                            pre_inference_rejection=pre_inference_rejection(response),
                             **error_details(response, self.api_key),
                         )
+                        if entry["pre_inference_rejection"]:
+                            self.ledger.expect_unbilled(
+                                request_id, entry.get("generation_id")
+                            )
+                            entry["billing_status"] = "expected_zero_unconfirmed"
                         self.audit.publish(entry)
                         await self.reconcile_error(client, entry, deadline)
+                        if (
+                            entry["pre_inference_rejection"]
+                            and entry.get("billing_status") != "confirmed"
+                        ):
+                            entry["billing_status"] = "expected_zero_unconfirmed"
                         raise ModelAPIError("Model API request failed")
                     data = response.json()
                     entry.update(status="received", response=data)
@@ -348,15 +379,19 @@ class OpenRouterModel:
                     entry.update(status="failed", error_type=type(error).__name__)
                     raise
                 finally:
-                    # Settled requests are unchanged; all uncertain charges retain
-                    # their holds, including cancellations and invalid billing.
+                    # Keep holds for ambiguous failures and cancellations.
                     self.ledger.uncertain(request_id)
                     self.audit.publish(entry)
                 if attempt == retries:
                     raise ModelAPIError("Model API retries exhausted")
+                live = self.config["live"]
+                prefix = (
+                    "rate_limit_retry" if entry.get("http_status") == 429 else "retry"
+                )
                 delay = min(
-                    self.config["live"]["retry_initial_seconds"] * 2**attempt,
-                    self.config["live"]["retry_max_seconds"],
+                    live.get(f"{prefix}_initial_seconds", live["retry_initial_seconds"])
+                    * 2**attempt,
+                    live.get(f"{prefix}_max_seconds", live["retry_max_seconds"]),
                 )
                 delay = max(delay, entry.get("retry_after_seconds", 0))
                 entry["retry_wait_seconds"] = delay

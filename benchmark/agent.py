@@ -376,7 +376,7 @@ class LiveAgent(BaseAgent):
         ledger = Ledger(
             ROOT / harness["spend_ledger"],
             self.config["spending"].get("limit_usd"),
-            self.config["spending"]["attempt_limit_usd"],
+            self.config["spending"].get("attempt_limit_usd"),
         )
         self.audit = AuditTrail(
             str(self.context_id),

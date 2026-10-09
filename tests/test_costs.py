@@ -77,12 +77,18 @@ def test_ledger_survives_restarts_and_settles_actual_charge(tmp_path):
     first = Ledger(path, 10)
     request = first.reserve("run", "agent", "model", 2)
     restarted = Ledger(path, 10)
-    assert restarted.totals() == {"billed_usd": 0, "held_usd": 2, "remaining_usd": 8}
+    assert restarted.totals() == {
+        "billed_usd": 0,
+        "held_usd": 2,
+        "remaining_usd": 8,
+        "expected_unbilled_requests": 0,
+    }
     restarted.settle(request, "0.125", "generation")
     assert first.totals() == {
         "billed_usd": 0.125,
         "held_usd": 0,
         "remaining_usd": 9.875,
+        "expected_unbilled_requests": 0,
     }
     with pytest.raises(CostAccountingError, match="already settled"):
         restarted.settle(request, 0, "generation")
@@ -102,7 +108,37 @@ def test_reviewed_unbilled_rejection_releases_hold_without_generation_id(tmp_pat
     request = ledger.reserve("rejected", "agent", "model", "0.75")
     ledger.uncertain(request)
     ledger.settle(request, 0, None)
-    assert ledger.totals() == {"billed_usd": 0, "held_usd": 0, "remaining_usd": 1}
+    assert ledger.totals() == {
+        "billed_usd": 0,
+        "held_usd": 0,
+        "remaining_usd": 1,
+        "expected_unbilled_requests": 0,
+    }
+
+
+def test_expected_unbilled_rejection_keeps_record_but_not_spending_hold(tmp_path):
+    path = tmp_path / "spend.sqlite3"
+    ledger = Ledger(path, 1, 1)
+    request = ledger.reserve("run", "agent", "model", 0.75)
+    ledger.expect_unbilled(request, "gen-rejected")
+    ledger.uncertain(request)
+    assert ledger.totals() == {
+        "billed_usd": 0,
+        "held_usd": 0,
+        "remaining_usd": 1,
+        "expected_unbilled_requests": 1,
+    }
+    restarted = Ledger(path, 1, 1)
+    replacement = restarted.reserve("run", "agent", "model", 0.75)
+    assert restarted.committed_for_role("agent") == Decimal("0.75")
+    with restarted.connect() as db:
+        assert db.execute(
+            "SELECT reserved, billed, status FROM requests WHERE id=?", (request,)
+        ).fetchone() == (750000, None, "expected_unbilled")
+    restarted.settle(request, 0.02, "gen-rejected")
+    assert restarted.totals()["expected_unbilled_requests"] == 0
+    assert restarted.totals()["billed_usd"] == 0.02
+    restarted.settle(replacement, 0, "gen-replacement")
 
 
 def test_local_ceiling_can_change_without_resetting_old_holds(tmp_path, monkeypatch):
@@ -173,6 +209,7 @@ def test_per_run_totals_report_shared_remaining_allowance(tmp_path):
         "billed_usd": 0,
         "held_usd": 0.2,
         "remaining_usd": 0.4,
+        "expected_unbilled_requests": 0,
     }
 
 
@@ -340,7 +377,7 @@ def test_discount_change_stops_the_pinned_route():
     config = load_draft(model="mistralai/mistral-large-4-0")
     endpoint = {
         "tag": "mistral",
-        "context_length": 524288,
+        "context_length": 1048576,
         "max_completion_tokens": 262144,
         "supported_parameters": ["tools", "max_tokens", "reasoning"],
         "pricing": {
@@ -354,3 +391,14 @@ def test_discount_change_stops_the_pinned_route():
     endpoint["pricing"]["discount"] = 0
     with pytest.raises(CostAccountingError):
         check_endpoint({"endpoints": [endpoint]}, config, Prices.from_config(config))
+
+
+def test_mimo_uses_official_thinking_mode_and_prices():
+    config = load_draft(model="xiaomi/mimo-v2.6-pro")
+    prices = Prices.from_config(config)
+    assert config["live"]["provider"] == "xiaomi/fp8"
+    assert config["live"]["provider_name"] == "Xiaomi"
+    assert config["live"]["reasoning"] is True
+    assert config["live"]["temperature"] == 1.0
+    assert config["budgets"]["agent_max_output_tokens"] == 131072
+    assert prices.reservation(131072) == Decimal("0.57016320")

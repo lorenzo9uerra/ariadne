@@ -52,8 +52,9 @@ def microdollars(value: object) -> int:
 class Ledger:
     """Track charges and reservations, enforcing any configured local ceilings.
 
-    Reserved and uncertain requests consume their entire reservation until
-    settled. Crashes therefore retain the hold. Fault attribution never refunds
+    Reserved and ambiguous requests consume their reservation until settled.
+    Explicit pre-inference rejections are expected unbilled, without a hold.
+    Crashes retain the hold. Fault attribution never refunds
     actual API spending; benchmark exclusions are separate reporting decisions.
     """
 
@@ -100,13 +101,15 @@ class Ledger:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             committed = db.execute(
-                "SELECT COALESCE(SUM(COALESCE(billed, reserved)), 0) FROM requests"
+                "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
+                "'expected_unbilled' THEN 0 ELSE reserved END)), 0) FROM requests"
             ).fetchone()[0]
             if self.limit is not None and committed + reserved > self.limit:
                 raise SpendingLimit("Local spending allowance exhausted")
             if self.attempt_limit is not None:
                 spent = db.execute(
-                    "SELECT COALESCE(SUM(COALESCE(billed, reserved)), 0) "
+                    "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
+                    "'expected_unbilled' THEN 0 ELSE reserved END)), 0) "
                     "FROM requests WHERE run_id=?",
                     (run_id,),
                 ).fetchone()[0]
@@ -122,8 +125,25 @@ class Ledger:
     def uncertain(self, request_id: str) -> None:
         with self.connect() as db:
             db.execute(
-                "UPDATE requests SET status='uncertain' WHERE id=? AND billed IS NULL",
+                "UPDATE requests SET status='uncertain' WHERE id=? AND billed IS NULL "
+                "AND status != 'expected_unbilled'",
                 (request_id,),
+            )
+
+    def expect_unbilled(self, request_id: str, generation_id: str | None) -> None:
+        """Stop holding a reviewed rejection without claiming a confirmed charge."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT billed FROM requests WHERE id=?", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise CostAccountingError("Unknown reservation")
+            if row[0] is not None:
+                return
+            db.execute(
+                "UPDATE requests SET status='expected_unbilled', generation_id=? WHERE id=?",
+                (generation_id, request_id),
             )
 
     def settle(
@@ -150,7 +170,8 @@ class Ledger:
         """Billed plus held dollars for one role, for ceilings within the cap."""
         with self.connect() as db:
             committed = db.execute(
-                "SELECT COALESCE(SUM(COALESCE(billed, reserved)), 0) FROM requests "
+                "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
+                "'expected_unbilled' THEN 0 ELSE reserved END)), 0) FROM requests "
                 "WHERE role=?",
                 (role,),
             ).fetchone()[0]
@@ -159,21 +180,26 @@ class Ledger:
     def totals(self, run_id: str | None = None) -> dict:
         query = (
             "SELECT COALESCE(SUM(billed), 0), "
-            "COALESCE(SUM(CASE WHEN billed IS NULL THEN reserved ELSE 0 END), 0) "
+            "COALESCE(SUM(CASE WHEN billed IS NULL AND status != 'expected_unbilled' "
+            "THEN reserved ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN status='expected_unbilled' AND billed IS NULL "
+            "THEN 1 ELSE 0 END), 0) "
             "FROM requests"
         )
         with self.connect() as db:
             db.execute("BEGIN")
-            billed, held = db.execute(
+            billed, held, expected_unbilled = db.execute(
                 query + (" WHERE run_id=?" if run_id is not None else ""),
                 (run_id,) if run_id is not None else (),
             ).fetchone()
             committed = db.execute(
-                "SELECT COALESCE(SUM(COALESCE(billed, reserved)), 0) FROM requests"
+                "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
+                "'expected_unbilled' THEN 0 ELSE reserved END)), 0) FROM requests"
             ).fetchone()[0]
         return {
             "billed_usd": billed / 1_000_000,
             "held_usd": held / 1_000_000,
+            "expected_unbilled_requests": expected_unbilled,
             "remaining_usd": (
                 max(0, self.limit - committed) / 1_000_000
                 if self.limit is not None
