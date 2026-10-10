@@ -982,9 +982,9 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
 
-    async def execute(folder, plan, item, *, slot=None, on_trial_result=None):
-        calls.append(slot)
-        for assigned in range(1, item["attempts"] + 1) if slot is None else (slot,):
+    async def execute(folder, plan, item, *, slots=None, on_trial_result=None):
+        calls.append(slots)
+        for assigned in slots or range(1, item["attempts"] + 1):
             trial = tmp_path / f"trial-{assigned}"
             trial.mkdir()
             for role in ("agent", "verifier"):
@@ -1007,10 +1007,11 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     monkeypatch.setattr(experiment, "execute_job", execute)
     monkeypatch.setattr(experiment, "report", lambda folder: None)
     if partial:
-        asyncio.run(execute(tmp_path, {}, item, slot=1))
+        asyncio.run(execute(tmp_path, {}, item, slots=[1]))
         calls.clear()
     asyncio.run(experiment.resume_experiment(tmp_path, "task"))
-    expected_calls = [2, 3] if partial else [None]
+    # One native job for the open slots: the rest after a partial run, or all three.
+    expected_calls = [[2, 3]] if partial else [[1, 2, 3]]
     assert calls == expected_calls
     assert capsys.readouterr().out.count("Billing pending for attempt") == (
         2 if partial else 3
@@ -1090,3 +1091,33 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
     assert len(list(experiment.pending(tmp_path, "task"))) == 1
     with pytest.raises(RuntimeError, match="API retry backoff"):
         experiment.check_result(row)
+
+
+def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
+    tmp_path, monkeypatch
+):
+    item = {"name": "task", "challenge": "task", "attempts": 3}
+    failed = {
+        "attempt": "failed",
+        "exception_type": None,
+        "stop_reason": "elapsed_seconds",
+        "review": {"disposition": "external_failure"},
+    }
+    rows = {("task", 1): failed}
+    calls = []
+    monkeypatch.setattr(experiment, "no_active_jobs", lambda *args: None)
+    monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
+    monkeypatch.setattr(experiment, "active", lambda folder: rows)
+    monkeypatch.setattr(experiment, "checked_result", lambda folder, row: None)
+    monkeypatch.setattr(experiment, "report", lambda folder: None)
+
+    async def replace(folder, name, slot):
+        calls.append(("replace", slot))
+
+    async def execute(folder, plan, item, *, slots=None, on_trial_result=None):
+        calls.append(("run", slots))
+
+    monkeypatch.setattr(experiment, "replace_attempt", replace)
+    monkeypatch.setattr(experiment, "execute_job", execute)
+    asyncio.run(experiment.resume_experiment(tmp_path))
+    assert calls == [("replace", 1), ("run", [2, 3])]

@@ -181,12 +181,16 @@ def collect(folder: Path, job_name: str) -> None:
                 append("result", attempt=event["attempt"], sha256=digest(path))
 
 
-def _planned_job(plan: dict, item: dict, slot, replaces) -> tuple[str, JobConfig]:
-    """The Harbor job for a planned run, or for one slot of it (a replacement)."""
+def _planned_job(
+    plan: dict, item: dict, slots: list[int], replaces
+) -> tuple[str, JobConfig]:
+    """The Harbor job for some of a task's slots: all of them, the rest, or one."""
     name = item["name"]
-    if slot is not None:
-        kind = "replacement" if replaces else "slot"
-        name = f"{name}-{kind}-{slot}-{uuid4().hex[:8]}"
+    if replaces:
+        name = f"{name}-replacement-{slots[0]}-{uuid4().hex[:8]}"
+    elif len(slots) < item["attempts"]:
+        numbers = "-".join(map(str, slots))
+        name = f"{name}-slots-{numbers}-{uuid4().hex[:8]}"
     name = f"{plan['job_prefix']}-{name}"
     agent = {
         "name": "ariadne",
@@ -201,7 +205,7 @@ def _planned_job(plan: dict, item: dict, slot, replaces) -> tuple[str, JobConfig
         dev=plan["development"],
         settings=plan["settings"],
         name=name,
-        attempts=item["attempts"] if slot is None else 1,
+        attempts=len(slots),
     )
     return name, config
 
@@ -211,12 +215,14 @@ async def execute_job(
     plan: dict,
     item: dict,
     *,
-    slot=None,
+    slots: list[int] | None = None,
     replaces=None,
     allow_fix=False,
     on_trial_result: Callable[[dict], None] | None = None,
 ) -> None:
-    """Run one Harbor job, journaling each trial as Harbor starts and ends it.
+    """Run one Harbor job for the given slots (default: all of the task's).
+
+    Harbor runs one trial per slot; the journal records each as it starts and ends.
 
     on_trial_result, if given, checks each finished trial; an exception there
     stops the job before its next trial creates an environment.
@@ -227,30 +233,32 @@ async def execute_job(
         raise ValueError(
             "Implementation changed; review a fix or start a new experiment"
         )
-    name, config = _planned_job(plan, item, slot, replaces)
+    slots = slots or list(range(1, item["attempts"] + 1))
+    name, config = _planned_job(plan, item, slots, replaces)
     with journal(folder) as (_, append):
         append(
             "job_started",
             job=name,
             planned_job=item["name"],
             implementation=current_implementation,
-            slot=slot,
+            slots=slots,
             replaces=replaces,
         )
-    next_slot = 0
+    started_trials = 0
     trial_error = None
 
     async def started(event):
-        nonlocal next_slot
+        nonlocal started_trials
         if trial_error is not None:
             raise trial_error
         verify_inputs(plan)
         if implementation() != current_implementation:
             raise ValueError("Implementation changed during the job")
-        next_slot += 1
-        assigned = slot if slot is not None else next_slot
-        if next_slot > config.n_attempts:
+        started_trials += 1
+        if started_trials > len(slots):
             raise ValueError("Native job exceeded the planned attempt count")
+        # Harbor starts trials one at a time; each takes the next open slot.
+        assigned = slots[started_trials - 1]
         result = event.config.trials_dir / event.trial_name / "result.json"
         with journal(folder) as (_, append):
             append(
@@ -437,48 +445,42 @@ def checked_result(folder, row):
 
 
 async def resume_experiment(folder: Path, task=None) -> None:
-    remaining = list(pending(folder, task))
-    batched = set()
-    for item, slot, previous in remaining:
-        if item["name"] in batched:
+    """For each task, replace reviewed failures, then run the slots that never ran."""
+    for item in read_plan(folder)["jobs"]:
+        if task is not None and item["challenge"] != task:
+            continue
+        open_slots = [
+            (slot, previous)
+            for entry, slot, previous in pending(folder, item["challenge"])
+            if entry["name"] == item["name"]
+        ]
+        if not open_slots:
             continue
         no_active_jobs(folder.parent)
-        group = [entry for entry in remaining if entry[0]["name"] == item["name"]]
-        if len(group) == item["attempts"] and all(entry[2] is None for entry in group):
-            print(
-                f"Running {item['name']} / {item['attempts']} trials",
-                flush=True,
-            )
-            try:
-                await execute_job(
-                    folder,
-                    read_plan(folder),
-                    item,
-                    on_trial_result=lambda row: checked_result(folder, row),
-                )
-            finally:
-                report(folder)
-            batched.add(item["name"])
-            continue
-        print(
-            f"Running {item['name']} / slot {slot}",
-            flush=True,
-        )
-        if previous is not None:
+        for slot, previous in open_slots:
+            if previous is None:
+                continue
             decision = previous.get("review") or {}
             if decision.get("disposition") not in EXCLUDED:
                 raise RuntimeError(
                     "An interrupted trial needs failure attribution before replacement"
                 )
+            print(f"Replacing {item['name']} / slot {slot}", flush=True)
             await replace_attempt(folder, item["name"], slot)
-        else:
-            plan = read_plan(folder)
+            checked_result(folder, active(folder).get((item["name"], slot)))
+        never_ran = [slot for slot, previous in open_slots if previous is None]
+        if never_ran:
+            print(f"Running {item['name']} / slots {never_ran}", flush=True)
             try:
-                await execute_job(folder, plan, item, slot=slot)
+                await execute_job(
+                    folder,
+                    read_plan(folder),
+                    item,
+                    slots=never_ran,
+                    on_trial_result=lambda row: checked_result(folder, row),
+                )
             finally:
                 report(folder)
-        row = active(folder).get((item["name"], slot))
-        checked_result(folder, row)
 
 
 async def run_experiment(
@@ -585,7 +587,7 @@ async def _replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
             folder,
             plan,
             item,
-            slot=slot,
+            slots=[slot],
             replaces=original,
             allow_fix=bool(
                 decision
