@@ -26,11 +26,15 @@ from benchmark.costs import (
 
 
 class ContextLimit(RuntimeError):
-    pass
+    """The next request would not fit the model's context window."""
 
 
 class ModelAPIError(RuntimeError):
-    pass
+    """The model API failed in a way that ends the attempt."""
+
+
+class RetryableAPIError(ModelAPIError):
+    """A failure worth retrying: HTTP 408, 429 or 5xx."""
 
 
 def retry_after(value: str | None) -> float | None:
@@ -254,8 +258,58 @@ class OpenRouterModel:
     async def generate(
         self, messages: list[dict], tools: list[dict], deadline: float
     ) -> dict:
+        """One completion, with a spending reservation and retries per request."""
         if not self.ready:
             raise CostAccountingError("Model preflight must pass before generation")
+        body, estimate, output = self._request(messages, tools)
+        retries = self.config["budgets"]["model_retries"]
+        async with httpx.AsyncClient(
+            transport=self.transport, trust_env=False, follow_redirects=False
+        ) as client:
+            for attempt in range(retries + 1):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Attempt deadline reached")
+                request_id = self.ledger.reserve(
+                    self.run_id,
+                    "agent",
+                    self.config["models"]["agent"],
+                    self.prices.reservation(output),
+                )
+                entry = self.audit.record(
+                    "model_request",
+                    request_id,
+                    status="pending",
+                    retry=attempt,
+                    estimated_input_tokens=estimate,
+                    max_output_tokens=output,
+                )
+                try:
+                    return await self._attempt(client, body, entry, deadline, remaining)
+                except (httpx.TransportError, TimeoutError) as error:
+                    entry.update(
+                        status="transport_error", error_type=type(error).__name__
+                    )
+                except RetryableAPIError:
+                    pass
+                except ModelAPIError:
+                    raise
+                except BaseException as error:
+                    entry.update(status="failed", error_type=type(error).__name__)
+                    raise
+                finally:
+                    # Keep holds for ambiguous failures and cancellations.
+                    self.ledger.uncertain(request_id)
+                    self.audit.publish(entry)
+                if attempt == retries:
+                    raise ModelAPIError("Model API retries exhausted")
+                await self._backoff(entry, attempt, deadline)
+        raise ModelAPIError("Model API did not return a completion")
+
+    def _request(
+        self, messages: list[dict], tools: list[dict]
+    ) -> tuple[dict, int, int]:
+        """The request body, its estimated input and the output that still fits."""
         estimate = input_tokens(
             messages,
             tools,
@@ -278,125 +332,86 @@ class OpenRouterModel:
         }
         if "reasoning" in self.config["live"]:
             body["reasoning"] = {"enabled": self.config["live"]["reasoning"]}
-        retries = self.config["budgets"]["model_retries"]
-        async with httpx.AsyncClient(
-            transport=self.transport,
-            trust_env=False,
-            follow_redirects=False,
-        ) as client:
-            for attempt in range(retries + 1):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("Attempt deadline reached")
-                request_id = self.ledger.reserve(
-                    self.run_id,
-                    "agent",
-                    self.config["models"]["agent"],
-                    self.prices.reservation(output),
-                )
-                entry = self.audit.record(
-                    "model_request",
-                    request_id,
-                    status="pending",
-                    retry=attempt,
-                    estimated_input_tokens=estimate,
-                    max_output_tokens=output,
-                )
-                retryable = False
-                try:
-                    response = await asyncio.wait_for(
-                        client.post(
-                            API_URL + "/chat/completions",
-                            headers={"Authorization": f"Bearer {self.api_key}"},
-                            json=body,
-                            timeout=remaining,
-                        ),
-                        remaining,
-                    )
-                    if not response.is_success:
-                        retryable = (
-                            response.status_code in (408, 429)
-                            or response.status_code >= 500
-                        )
-                        entry.update(
-                            status="http_error",
-                            http_status=response.status_code,
-                            pre_inference_rejection=pre_inference_rejection(response),
-                            **error_details(response, self.api_key),
-                        )
-                        if entry["pre_inference_rejection"]:
-                            self.ledger.expect_unbilled(
-                                request_id, entry.get("generation_id")
-                            )
-                            entry["billing_status"] = "expected_zero_unconfirmed"
-                        self.audit.publish(entry)
-                        await self.reconcile_error(client, entry, deadline)
-                        if (
-                            entry["pre_inference_rejection"]
-                            and entry.get("billing_status") != "confirmed"
-                        ):
-                            entry["billing_status"] = "expected_zero_unconfirmed"
-                        raise ModelAPIError("Model API request failed")
-                    data = response.json()
-                    entry.update(status="received", response=data)
-                    charge, generation_id = billed_response(
-                        data, self.config["live"]["provider_name"]
-                    )
-                    self.ledger.settle(request_id, charge, generation_id)
-                    usage = usage_fields(data)
-                    for name, value in usage.items():
-                        self.usage[name] += value
-                    entry.update(status="settled", billed_usd=str(charge))
-                    if (
-                        usage["prompt_tokens"] + usage["completion_tokens"]
-                        > self.prices.context_tokens
-                    ):
-                        raise CostAccountingError(
-                            "Reported usage exceeds the verified context window"
-                        )
-                    if len(data.get("choices", [])) != 1:
-                        raise ModelAPIError("Expected exactly one completion choice")
-                    message = data["choices"][0]["message"]
-                    if (
-                        not isinstance(message, dict)
-                        or message.get("role") != "assistant"
-                    ):
-                        raise ModelAPIError("Invalid completion message")
-                    return {
-                        "message": message,
-                        "usage": usage,
-                        "cost_usd": float(charge),
-                    }
-                except (httpx.TransportError, TimeoutError) as error:
-                    retryable = True
-                    entry.update(
-                        status="transport_error", error_type=type(error).__name__
-                    )
-                except ModelAPIError:
-                    if not retryable:
-                        raise
-                except BaseException as error:
-                    entry.update(status="failed", error_type=type(error).__name__)
-                    raise
-                finally:
-                    # Keep holds for ambiguous failures and cancellations.
-                    self.ledger.uncertain(request_id)
-                    self.audit.publish(entry)
-                if attempt == retries:
-                    raise ModelAPIError("Model API retries exhausted")
-                live = self.config["live"]
-                prefix = (
-                    "rate_limit_retry" if entry.get("http_status") == 429 else "retry"
-                )
-                delay = min(
-                    live.get(f"{prefix}_initial_seconds", live["retry_initial_seconds"])
-                    * 2**attempt,
-                    live.get(f"{prefix}_max_seconds", live["retry_max_seconds"]),
-                )
-                delay = max(delay, entry.get("retry_after_seconds", 0))
-                entry["retry_wait_seconds"] = delay
-                self.audit.publish(entry)
-                if delay >= deadline - time.monotonic():
-                    raise TimeoutError("Attempt deadline reached during retry backoff")
-                await asyncio.sleep(delay)
-        raise ModelAPIError("Model API did not return a completion")
+        return body, estimate, output
+
+    async def _attempt(
+        self,
+        client: httpx.AsyncClient,
+        body: dict,
+        entry: dict,
+        deadline: float,
+        remaining: float,
+    ) -> dict:
+        """Send one request; settle its charge and validate the completion."""
+        request_id = entry["call_id"]
+        response = await asyncio.wait_for(
+            client.post(
+                API_URL + "/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json=body,
+                timeout=remaining,
+            ),
+            remaining,
+        )
+        if not response.is_success:
+            entry.update(
+                status="http_error",
+                http_status=response.status_code,
+                pre_inference_rejection=pre_inference_rejection(response),
+                **error_details(response, self.api_key),
+            )
+            if entry["pre_inference_rejection"]:
+                self.ledger.expect_unbilled(request_id, entry.get("generation_id"))
+                entry["billing_status"] = "expected_zero_unconfirmed"
+            self.audit.publish(entry)
+            await self.reconcile_error(client, entry, deadline)
+            if (
+                entry["pre_inference_rejection"]
+                and entry.get("billing_status") != "confirmed"
+            ):
+                entry["billing_status"] = "expected_zero_unconfirmed"
+            retryable = (
+                response.status_code in (408, 429) or response.status_code >= 500
+            )
+            raise (RetryableAPIError if retryable else ModelAPIError)(
+                "Model API request failed"
+            )
+        data = response.json()
+        entry.update(status="received", response=data)
+        charge, generation_id = billed_response(
+            data, self.config["live"]["provider_name"]
+        )
+        self.ledger.settle(request_id, charge, generation_id)
+        usage = usage_fields(data)
+        for name, value in usage.items():
+            self.usage[name] += value
+        entry.update(status="settled", billed_usd=str(charge))
+        if (
+            usage["prompt_tokens"] + usage["completion_tokens"]
+            > self.prices.context_tokens
+        ):
+            raise CostAccountingError(
+                "Reported usage exceeds the verified context window"
+            )
+        if len(data.get("choices", [])) != 1:
+            raise ModelAPIError("Expected exactly one completion choice")
+        message = data["choices"][0]["message"]
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            raise ModelAPIError("Invalid completion message")
+        return {"message": message, "usage": usage, "cost_usd": float(charge)}
+
+    async def _backoff(self, entry: dict, attempt: int, deadline: float) -> None:
+        """Exponential backoff, slower for rate limits, at least any Retry-After."""
+        live = self.config["live"]
+        prefix = "rate_limit_retry" if entry.get("http_status") == 429 else "retry"
+        delay = min(
+            live.get(f"{prefix}_initial_seconds", live["retry_initial_seconds"])
+            * 2**attempt,
+            live.get(f"{prefix}_max_seconds", live["retry_max_seconds"]),
+        )
+        delay = max(delay, entry.get("retry_after_seconds", 0))
+        entry["retry_wait_seconds"] = delay
+        self.audit.publish(entry)
+        if delay >= deadline - time.monotonic():
+            raise TimeoutError("Attempt deadline reached during retry backoff")
+        await asyncio.sleep(delay)

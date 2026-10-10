@@ -115,6 +115,7 @@ default-groups = ["builders", "dev"]
 dependencies = [
     { name = "harbor" },
     { name = "httpx" },
+    { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "tiktoken" },
 ]
@@ -137,6 +138,7 @@ infra = [
 requires-dist = [
     { name = "harbor", specifier = "==0.24.0" },
     { name = "httpx", specifier = "==0.28.1" },
+    { name = "pydantic", specifier = "==2.13.5" },
     { name = "python-dotenv", specifier = "==1.2.3" },
     { name = "tiktoken", specifier = "==0.14.0" },
 ]
