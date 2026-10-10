@@ -176,7 +176,7 @@ def test_native_job_retains_scores_and_trajectory(tmp_path, weight, milestone):
             "tasks": [{"path": str(task)}],
             "agents": [
                 {
-                    "import_path": "benchmark.agent:ScriptedAgent",
+                    "import_path": "tests.support:ScriptedAgent",
                     "kwargs": {"submission": SAFE},
                 }
             ],

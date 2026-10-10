@@ -18,7 +18,6 @@ from harbor.models.trajectories import Trajectory
 from harbor.models.trial.paths import TrialPaths
 
 from benchmark import verifier
-from benchmark.agent import ScriptedAgent
 from benchmark.answers import METRICS, reward_values
 from benchmark.packages import Package
 from benchmark.verifier import grade
@@ -31,6 +30,7 @@ from sandbox.environment import (
 from tests.support import (
     SAFE,
     WRONG,
+    ScriptedAgent,
     assert_isolation_and_cleanup,
     export_task,
     run_trial,
