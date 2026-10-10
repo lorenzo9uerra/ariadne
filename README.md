@@ -266,6 +266,9 @@ Open all jobs in Harbor View:
 uv run harbor view jobs
 ```
 
+[`logs/pwn-01-long-runs/`](logs/pwn-01-long-runs/README.md) holds two complete
+trajectories from long, unscored pwn-01 attempts, viewable the same way.
+
 For a quick paid check outside an experiment, run one trial with the Ariadne
 agent; `-m` takes the model's full OpenRouter name:
 

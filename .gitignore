@@ -12,8 +12,10 @@ __pycache__/
 .ruff_cache/
 .ty_cache/
 
-# Local evaluation logs, audits and spending ledger
-/logs/
+# Local evaluation logs, audits and spending ledger; only cleaned, released
+# trajectories are tracked
+/logs/*
+!/logs/pwn-01-long-runs/
 /jobs/
 
 # Local copies of third-party source archives
