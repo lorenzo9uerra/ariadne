@@ -91,14 +91,9 @@ def validate_rewards(
     rewards: dict[str, int | float],
     answer_type: str,
     weights: object = None,
-    *,
-    legacy: bool = False,
 ) -> None:
     metrics = answer_metrics(answer_type)
     scores = {key: rewards[key] for key in metrics if key in rewards}
-    if legacy and set(rewards) == set(metrics):
-        reward_values(scores)
-        return
     weights = reward_weights(weights, answer_type=answer_type)
     milestones = {
         key: rewards[key]
@@ -116,12 +111,8 @@ def validate_rewards(
 
 
 def is_success(rewards: dict[str, int | float] | None) -> bool:
-    """Read primary success, with support for older binary-only result files."""
-    if not rewards:
-        return False
-    if "task_success" in rewards:
-        return rewards["task_success"] == 1
-    return all(value == 1 for value in rewards.values())
+    """Whether the verifier recorded a full solve."""
+    return bool(rewards) and rewards.get("task_success") == 1
 
 
 def inner(flag: str) -> str:

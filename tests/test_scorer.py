@@ -149,10 +149,3 @@ def test_native_reward_forgery_is_rejected(change):
     rewards = reward_values({"flag_correct": 0}) | change
     with pytest.raises(ValueError):
         validate_rewards(rewards, "flag")
-
-
-def test_old_native_results_remain_readable():
-    validate_rewards({"flag_correct": 1}, "flag", legacy=True)
-    assert is_success({"flag_correct": 1})
-    with pytest.raises(ValueError):
-        validate_rewards({"flag_correct": 1}, "flag")
