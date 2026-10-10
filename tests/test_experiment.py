@@ -19,10 +19,12 @@ from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
 from harbor.models.verifier.result import VerifierResult
 from harbor.viewer.scanner import JobScanner
 
+from benchmark import __main__ as cli
 from benchmark import experiment, records, report
 from benchmark.answers import METRICS, reward_values
 from benchmark.budgets import load_draft
 from benchmark.experiment import check_result
+from benchmark.review import review as record_review
 from benchmark.tasks import ROOT, load_package
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
@@ -34,6 +36,8 @@ from tests.support import (
     review_package,
     synthetic_package,
 )
+
+TASK = {"name": "task", "challenge": "task", "attempts": 1}
 
 
 @pytest.fixture
@@ -169,7 +173,7 @@ def run(harness, tmp_path, **kwargs):
 
 
 def count(folder, attempt, **kwargs):
-    experiment.review(
+    record_review(
         folder,
         attempt,
         "counted",
@@ -365,7 +369,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
     original_bytes = path.read_bytes()
     with pytest.raises(ValueError, match="reviewed"):
         asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
-    experiment.review(
+    record_review(
         folder,
         original["attempt"],
         "implementation_fault",
@@ -378,7 +382,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
         count(folder, row["attempt"])
     implementation = experiment.ROOT / "benchmark/agent.py"
     implementation.write_text("# Synthetic implementation v2\n")
-    experiment.review(
+    record_review(
         folder,
         original["attempt"],
         "implementation_fault",
@@ -412,7 +416,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
 def test_drift_blocks_generation_even_for_replacements(harness, tmp_path, change):
     folder = run(harness, tmp_path)
     row = experiment.report(folder)["attempts"][0]
-    experiment.review(
+    record_review(
         folder,
         row["attempt"],
         "external_failure",
@@ -443,7 +447,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
     saved = path.read_bytes()
     for reviewer, note in (("human", ""), ("autoreview-v1", "Unknown cause")):
         with pytest.raises(ValueError, match="explicit owner decision"):
-            experiment.review(
+            record_review(
                 folder,
                 original["attempt"],
                 "unattributed_failure",
@@ -451,7 +455,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
                 evidence=["Synthetic interruption"],
                 note=note,
             )
-    experiment.review(
+    record_review(
         folder,
         original["attempt"],
         "unattributed_failure",
@@ -469,7 +473,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
 def test_replacement_lock_and_reviewed_fix_hash(harness, tmp_path):
     folder = run(harness, tmp_path)
     row = experiment.report(folder)["attempts"][0]
-    experiment.review(
+    record_review(
         folder,
         row["attempt"],
         "implementation_fault",
@@ -525,7 +529,7 @@ def test_interrupted_attempt_keeps_evidence_and_missing_slots_pending(
     assert original["raw_solve"] is None and original["cost_usd"] is None
     with pytest.raises(ValueError, match="unfinished"):
         count(folder, original["attempt"])
-    experiment.review(
+    record_review(
         folder,
         original["attempt"],
         "external_failure",
@@ -567,11 +571,11 @@ def test_check_confirms_evidence_and_removed_containers(
     argv = ["experiment", "check"] + ([] if removed else [str(job)])
     monkeypatch.setattr(sys, "argv", argv)
     if removed:
-        experiment.main()
+        cli.main()
         assert capsys.readouterr().out.count("evidence confirmed") == 3
     else:
         with pytest.raises(SystemExit):
-            experiment.main()
+            cli.main()
         assert "was not removed" in capsys.readouterr().err
 
 
@@ -809,8 +813,8 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
         seen.append(kwargs["settings"])
         return await original(packages, jobs_dir, seed=7, **kwargs)
 
-    monkeypatch.setattr(experiment, "load_package", lambda path: harness[0])
-    monkeypatch.setattr(experiment, "run_experiment", experiment_run)
+    monkeypatch.setattr(cli, "load_package", lambda path: harness[0])
+    monkeypatch.setattr(cli, "run_experiment", experiment_run)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -827,7 +831,7 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
             str(tmp_path / "jobs"),
         ],
     )
-    experiment.main()
+    cli.main()
     assert seen[0]["models"]["agent"] == "openrouter/" + model
     assert seen[0]["runs"]["independent_attempts"] == 3
     assert seen[0]["budgets"]["elapsed_seconds"] == 1800
@@ -967,12 +971,7 @@ def test_resume_preserves_finished_trials_and_replaces_attributed_timeout(
         "held_usd": 0,
     }
     monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
-    monkeypatch.setattr(
-        experiment,
-        "read_plan",
-        lambda folder: {"jobs": [{"name": "task", "challenge": "task", "attempts": 1}]},
-    )
-    assert len(list(experiment.pending(None, "task"))) == expected
+    assert len(experiment.open_slots(Path("synthetic"), TASK)) == expected
 
 
 @pytest.mark.parametrize("partial", [False, True])
@@ -1037,12 +1036,7 @@ def test_resume_skips_completed_trial_with_missing_cost(monkeypatch):
         "held_usd": None,
     }
     monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
-    monkeypatch.setattr(
-        experiment,
-        "read_plan",
-        lambda folder: {"jobs": [{"name": "task", "challenge": "task", "attempts": 1}]},
-    )
-    assert list(experiment.pending(None, "task")) == []
+    assert experiment.open_slots(Path("synthetic"), TASK) == []
 
 
 def test_pending_billing_does_not_bypass_failed_isolation(tmp_path):
@@ -1090,12 +1084,7 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
         "review": None,
     }
     monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
-    monkeypatch.setattr(
-        experiment,
-        "read_plan",
-        lambda folder: {"jobs": [{"name": "task", "challenge": "task", "attempts": 1}]},
-    )
-    assert len(list(experiment.pending(tmp_path, "task"))) == 1
+    assert len(experiment.open_slots(tmp_path, TASK)) == 1
     with pytest.raises(RuntimeError, match="API retry backoff"):
         experiment.check_result(row)
 
@@ -1115,7 +1104,7 @@ def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
     monkeypatch.setattr(experiment, "no_active_jobs", lambda *args: None)
     monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
-    monkeypatch.setattr(experiment, "checked_result", lambda folder, row: None)
+    monkeypatch.setattr(experiment, "check_result", lambda row: None)
     monkeypatch.setattr(experiment, "report", lambda folder: None)
 
     async def replace(folder, name, slot):
@@ -1137,9 +1126,9 @@ def test_resume_command_continues_the_experiment(harness, tmp_path, monkeypatch)
     async def resume(path, task=None):
         resumed.append(path)
 
-    monkeypatch.setattr(experiment, "resume_experiment", resume)
+    monkeypatch.setattr(cli, "resume_experiment", resume)
     monkeypatch.setattr(sys, "argv", ["experiment", "resume", str(folder)])
-    experiment.main()
+    cli.main()
     assert resumed == [folder.resolve()]
 
 

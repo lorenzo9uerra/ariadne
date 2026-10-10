@@ -75,12 +75,7 @@ def score_attempt(
     rewards = trial.verifier_result.rewards if trial.verifier_result else None
     job = next(item for item in plan["jobs"] if item["name"] == attempt["planned_job"])
     if rewards is not None:
-        validate_rewards(
-            rewards,
-            job["answer_type"],
-            job.get("reward_weights"),
-            legacy="reward_weights" not in job,
-        )
+        validate_rewards(rewards, job["answer_type"], job["reward_weights"])
     row["components"] = rewards
     row["raw_solve"] = int(is_success(rewards) and trial.exception_info is None)
     spending = metadata.get("spending", {})

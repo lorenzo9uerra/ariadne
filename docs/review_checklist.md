@@ -18,8 +18,8 @@ Start with automatic review, then record a decision for each attempt the
 report lists under `automatic_review.flagged_for_human`:
 
 ```sh
-uv run python -m benchmark.experiment autoreview EXPERIMENT
-uv run python -m benchmark.experiment review EXPERIMENT ATTEMPT_UUID \
+uv run python -m benchmark autoreview EXPERIMENT
+uv run python -m benchmark review EXPERIMENT ATTEMPT_UUID \
   --disposition counted --reviewer YOUR_NAME --evidence 'path/to/notes'
 ```
 

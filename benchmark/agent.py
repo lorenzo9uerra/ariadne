@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+import os
 import shlex
 import time
 import tomllib
@@ -10,6 +11,7 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 from string import Template
 
+from dotenv import load_dotenv
 from harbor.agents.base import BaseAgent
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.environments.base import BaseEnvironment
@@ -218,10 +220,7 @@ class AriadneAgent(BaseAgent):
         return package_version("ariadne")
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        import os
-
-        from dotenv import load_dotenv
-
+        """Connect the model and reviewed web access; check both routes first."""
         if not isinstance(environment, AriadneDockerEnvironment):
             raise ValueError("The Ariadne agent requires its verified environment")
         environment.require_submission_tool()
@@ -245,6 +244,12 @@ class AriadneAgent(BaseAgent):
             self.audit,
         )
         await self.model.check_route()
+        await self._setup_web(environment, ledger, self.model.api_key)
+
+    async def _setup_web(
+        self, environment: AriadneDockerEnvironment, ledger: Ledger, api_key: str
+    ) -> None:
+        """The reviewer, the private records it checks against, and the search backend."""
         package = getattr(environment, "_package", None)
         if package is None:
             raise ValueError("Reviewed web access requires an admitted task")
@@ -259,9 +264,7 @@ class AriadneAgent(BaseAgent):
         tavily_key = os.environ.get("TAVILY_API_KEY", "")
         if not tavily_key:
             raise CostAccountingError("Reviewed web access needs TAVILY_API_KEY")
-        monitor = live_monitor(
-            self.config, ledger, self.model.api_key, str(self.context_id)
-        )
+        monitor = live_monitor(self.config, ledger, api_key, str(self.context_id))
         if monitor.reviewer.settings["model"] == self.config["models"][
             "agent"
         ].removeprefix("openrouter/"):

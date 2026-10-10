@@ -357,11 +357,7 @@ class Reviewer:
 
 def load_reviewers(config: dict, names: list[str] | None = None) -> list[Reviewer]:
     sections = config["reviewers"]
-    # Experiments frozen before the comparison settings were removed keep the
-    # seed under [reviewer_comparison].
-    seed = (
-        config["models"].get("reviewer_seed") or config["reviewer_comparison"]["seed"]
-    )
+    seed = config["models"]["reviewer_seed"]
     chosen = names or sorted(sections)
     unknown = set(chosen) - set(sections)
     if unknown:

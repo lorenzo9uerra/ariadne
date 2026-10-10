@@ -7,12 +7,11 @@ import pytest
 
 from benchmark.tasks import (
     ROOT,
-    load_config,
     load_package,
     prepare_service,
-    target_limits,
     validate_target_seccomp,
 )
+from tests.support import load_config, target_limits
 
 FIXTURE = ROOT / "tests" / "fixtures" / "service-01"
 FLAG_KEY = "target:/workspace/flag.txt"
