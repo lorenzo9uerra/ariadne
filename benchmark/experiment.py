@@ -27,7 +27,6 @@ from benchmark.answers import (
     reward_weights,
 )
 from benchmark.budgets import load_draft
-from benchmark.packages import ROOT, Package
 from benchmark.records import (
     DISPOSITIONS,
     EXCLUDED,
@@ -42,7 +41,7 @@ from benchmark.records import (
 )
 from benchmark.report import report
 from benchmark.review import autoreview_experiment, review
-from benchmark.tasks import reviewer_context
+from benchmark.tasks import ROOT, Package, reviewer_context
 
 
 class ProgressStream:

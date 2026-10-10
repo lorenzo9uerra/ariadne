@@ -5,8 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from benchmark.packages import ROOT, load_package, validate_target_seccomp
-from benchmark.tasks import load_config, prepare_service, target_limits
+from benchmark.tasks import (
+    ROOT,
+    load_config,
+    load_package,
+    prepare_service,
+    target_limits,
+    validate_target_seccomp,
+)
 
 FIXTURE = ROOT / "tests" / "fixtures" / "service-01"
 FLAG_KEY = "target:/workspace/flag.txt"

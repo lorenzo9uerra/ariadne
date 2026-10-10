@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from benchmark.packages import ROOT
+from benchmark.tasks import ROOT
 
 DISPOSITIONS = {
     "counted",

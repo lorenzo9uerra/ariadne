@@ -6,7 +6,7 @@ import json
 import tomllib
 from pathlib import Path
 
-from benchmark.packages import ROOT, load_package
+from benchmark.tasks import ROOT, load_package
 
 FLAG = "flag{0123456789abcdef0123456789abcdef}"
 

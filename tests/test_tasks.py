@@ -7,8 +7,7 @@ import tomllib
 import pytest
 from harbor.models.task.task import Task
 
-from benchmark.packages import ROOT, load_package
-from benchmark.tasks import reviewer_context
+from benchmark.tasks import ROOT, load_package, reviewer_context
 
 
 def test_all_tasks_use_native_definitions_and_separate_verifier():

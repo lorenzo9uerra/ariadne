@@ -6,7 +6,7 @@ import shutil
 
 import pytest
 
-from benchmark.packages import ROOT, load_package
+from benchmark.tasks import ROOT, load_package
 
 PACKAGE = ROOT / "tasks/code-02"
 

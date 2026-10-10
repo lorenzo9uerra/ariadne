@@ -24,8 +24,8 @@ from rich.progress import Progress
 from benchmark.agent import LiveAgent
 from benchmark.budgets import load_draft
 from benchmark.experiment import create_job, job_config
-from benchmark.packages import ROOT
 from benchmark.runner import agent_config
+from benchmark.tasks import ROOT
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
     SAFE,

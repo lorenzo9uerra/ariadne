@@ -14,8 +14,9 @@ from harbor.models.task.config import NetworkPolicy
 from harbor.models.task.task import Task
 
 from benchmark.answers import reward_values
-from benchmark.packages import ROOT, load_package
 from benchmark.tasks import (
+    ROOT,
+    load_package,
     prepare_trial_instance,
     read_trial_instance,
 )

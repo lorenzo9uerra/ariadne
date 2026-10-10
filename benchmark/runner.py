@@ -17,7 +17,7 @@ from benchmark.experiment import (
     run_experiment,
 )
 from benchmark.oracle import redact
-from benchmark.packages import ROOT, load_package
+from benchmark.tasks import ROOT, load_package
 from sandbox.docker_host import ensure_image, select_platform
 
 

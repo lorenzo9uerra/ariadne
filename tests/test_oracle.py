@@ -12,7 +12,7 @@ from benchmark.oracle import (
     redact,
     translate_oracle_command,
 )
-from benchmark.packages import ROOT
+from benchmark.tasks import ROOT
 
 TASKS = (
     "code-01",

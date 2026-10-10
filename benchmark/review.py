@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-from benchmark.packages import ROOT
 from benchmark.records import (
     DISPOSITIONS,
     digest,
@@ -11,6 +10,7 @@ from benchmark.records import (
     read_plan,
 )
 from benchmark.report import report
+from benchmark.tasks import ROOT
 
 
 def review(

@@ -1,6 +1,6 @@
 """Keep the README canary out of task material."""
 
-from benchmark.packages import ROOT
+from benchmark.tasks import ROOT
 
 PACKAGES = sorted(p for p in (ROOT / "tasks").iterdir() if (p / "task.toml").exists())
 

@@ -23,7 +23,7 @@ from benchmark import experiment, records, report, runner
 from benchmark.answers import METRICS, reward_values
 from benchmark.budgets import load_draft
 from benchmark.experiment import check_result
-from benchmark.packages import ROOT, load_package
+from benchmark.tasks import ROOT, load_package
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
     SAFE,

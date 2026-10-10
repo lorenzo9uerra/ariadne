@@ -17,7 +17,6 @@ import httpx
 
 from benchmark.answers import is_success
 from benchmark.model import error_details
-from benchmark.packages import load_package
 from benchmark.records import ORDINARY, journal, read_plan
 from benchmark.report import review_blockers
 from benchmark.review import review
@@ -28,7 +27,7 @@ from benchmark.reviewers import (
     tokens,
     verify_route,
 )
-from benchmark.tasks import read_trial_instance, reviewer_context
+from benchmark.tasks import load_package, read_trial_instance, reviewer_context
 
 REVIEWER = "autoreview-v1"
 TRIAGE_REASON_CHARS = 1024

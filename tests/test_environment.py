@@ -19,7 +19,7 @@ from harbor.models.trial.paths import TrialPaths
 
 from benchmark import verifier
 from benchmark.answers import METRICS, reward_values
-from benchmark.packages import Package
+from benchmark.tasks import Package
 from benchmark.verifier import grade
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import (

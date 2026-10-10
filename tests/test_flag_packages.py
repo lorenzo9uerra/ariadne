@@ -15,8 +15,9 @@ from harbor.models.job.config import JobConfig
 from harbor.models.trial.result import TrialResult
 
 from benchmark.answers import reward_values
-from benchmark.packages import ROOT, load_package
 from benchmark.tasks import (
+    ROOT,
+    load_package,
     prepare_instance,
     prepare_trial_instance,
     read_trial_instance,

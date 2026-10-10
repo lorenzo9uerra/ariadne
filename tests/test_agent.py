@@ -20,8 +20,8 @@ from harbor.models.trial.result import TrialResult
 from benchmark.agent import LiveAgent, decode_capture, parse_calls
 from benchmark.answers import reward_values
 from benchmark.budgets import load_draft
-from benchmark.packages import ROOT
 from benchmark.runner import agent_config, run_job
+from benchmark.tasks import ROOT
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import AriadneDockerEnvironment
 from tests.support import (

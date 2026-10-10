@@ -5,7 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from benchmark.packages import ROOT, load_package
+from benchmark.tasks import ROOT, load_package
 
 PACKAGE = ROOT / "tasks/pwn-01"
 

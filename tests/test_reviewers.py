@@ -319,7 +319,7 @@ def test_live_oversized_context_is_never_sent(tmp_path):
 
 
 def backend(tmp_path, handler, limits=None):
-    from benchmark.backends import LiveBackend
+    from benchmark.web import LiveBackend
 
     config = load_draft()["web"] | (limits or {})
     ledger = Ledger(tmp_path / "ledger.sqlite3", "10")

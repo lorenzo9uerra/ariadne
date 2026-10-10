@@ -118,7 +118,7 @@ def test_analysis_tools_through_docker(tmp_path):
     import asyncio
     import shlex
 
-    from benchmark.packages import Package
+    from benchmark.tasks import Package
     from sandbox.docker_host import ensure_image, select_platform
     from tests.support import SAFE, assert_isolation_and_cleanup, export_task, run_trial
 
