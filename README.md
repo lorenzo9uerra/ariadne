@@ -257,12 +257,12 @@ Open all jobs in Harbor View:
 uv run harbor view jobs
 ```
 
-For a quick paid check outside an experiment, run one trial with the live
+For a quick paid check outside an experiment, run one trial with the Ariadne
 agent; `-m` takes the model's full OpenRouter name:
 
 ```sh
 uv run harbor run -c job.dev.yaml -p tasks/rev-01 \
-  --agent-import-path benchmark.agent:LiveAgent \
+  --agent-import-path benchmark.agent:AriadneAgent \
   -m openrouter/mistralai/mistral-large-4-0
 ```
 

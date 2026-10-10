@@ -17,7 +17,7 @@ from harbor.models.trajectories import Trajectory
 from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 
-from benchmark.agent import LiveAgent, decode_capture, parse_calls
+from benchmark.agent import AriadneAgent, decode_capture, parse_calls
 from benchmark.answers import reward_values
 from benchmark.budgets import load_draft
 from benchmark.tasks import ROOT
@@ -27,10 +27,10 @@ from tests.support import (
     SAFE,
     WRONG,
     api_call,
+    ariadne_agent,
     assert_isolation_and_cleanup,
     completion,
     export_review_task,
-    live_agent,
     review_package,
     run_job,
 )
@@ -46,7 +46,7 @@ def environment_stub(tmp_path):
 
 
 def run_agent(environment, config):
-    agent = LiveAgent(logs_dir=environment.trial_paths.agent_dir, config=config)
+    agent = AriadneAgent(logs_dir=environment.trial_paths.agent_dir, config=config)
     agent.context_id = environment.context_id
     agent.session_id = "synthetic-agent"
     context = AgentContext()
@@ -404,7 +404,7 @@ def test_mocked_reviewed_web_through_native_job(tmp_path, live_mock, reviewed_we
         ]
     )
     result, folder = asyncio.run(
-        run_job(task, tmp_path / "jobs", live_agent(), dev=True)
+        run_job(task, tmp_path / "jobs", ariadne_agent(), dev=True)
     )
     assert result.stats.n_errored_trials == 0
     path = next(folder.glob("*/result.json"))
@@ -626,9 +626,11 @@ def test_over_budget_arguments_are_counted_without_json_parsing(tmp_path, live_m
     assert proposed[0].extra["parse_error"] is None
 
 
-def test_live_agent_rejects_alternate_host_environment(tmp_path):
+def test_ariadne_agent_rejects_alternate_host_environment(tmp_path):
     with pytest.raises(ValueError, match="Extra environment"):
-        LiveAgent(logs_dir=tmp_path, extra_env={"OPENROUTER_API_KEY": "synthetic-key"})
+        AriadneAgent(
+            logs_dir=tmp_path, extra_env={"OPENROUTER_API_KEY": "synthetic-key"}
+        )
 
 
 def test_unverified_billing_stops_before_tool_execution(tmp_path, live_mock):
@@ -676,7 +678,7 @@ def test_cancelled_bash_keeps_pending_proposal(tmp_path, live_mock, monkeypatch)
     os.environ.get("RUN_DOCKER") != "1", reason="Unpaid mocked-agent Docker integration"
 )
 @pytest.mark.parametrize("case", ["submit", "file_without_submit", "conflicting_file"])
-def test_mocked_live_agent_through_native_job(tmp_path, live_mock, case):
+def test_mocked_ariadne_agent_through_native_job(tmp_path, live_mock, case):
     config, replies, seen = live_mock
     platform = select_platform("any")
     image = ensure_image(platform)
@@ -730,7 +732,7 @@ def test_mocked_live_agent_through_native_job(tmp_path, live_mock, case):
         )
         replies.append(completion([api_call("submit", {"answer": WRONG})]))
     result, folder = asyncio.run(
-        run_job(task, tmp_path / "jobs", live_agent(config), dev=True)
+        run_job(task, tmp_path / "jobs", ariadne_agent(config), dev=True)
     )
     assert result.stats.n_errored_trials == 0
     native = JobConfig.model_validate_json((folder / "config.json").read_text())
@@ -799,7 +801,7 @@ def test_mocked_agent_output_bounds_and_timeout_cleanup(tmp_path, live_mock):
         platform,
     )
     result, folder = asyncio.run(
-        run_job(task, tmp_path / "jobs", live_agent(), dev=True)
+        run_job(task, tmp_path / "jobs", ariadne_agent(), dev=True)
     )
     assert result.stats.n_errored_trials == 0
     path = next(folder.glob("*/result.json"))
@@ -849,7 +851,7 @@ def test_live_reviewed_web_with_synthetic_task(tmp_path):
             **yaml.safe_load((ROOT / "job.dev.yaml").read_text()),
             "jobs_dir": str(ROOT / "jobs"),
             "tasks": [{"path": str(task)}],
-            "agents": [live_agent(settings)],
+            "agents": [ariadne_agent(settings)],
         }
     )
 

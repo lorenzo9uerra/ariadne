@@ -90,7 +90,7 @@ def job_config(
         raise ValueError("Review concurrency or automatic retries before changing them")
     if name is not None:
         data["job_name"] = name
-    if agent.get("import_path") == "benchmark.agent:LiveAgent":
+    if agent.get("import_path") == "benchmark.agent:AriadneAgent":
         limits = (settings or agent.get("kwargs", {}).get("config") or load_draft())[
             "budgets"
         ]
@@ -190,7 +190,7 @@ def _planned_job(plan: dict, item: dict, slot, replaces) -> tuple[str, JobConfig
     name = f"{plan['job_prefix']}-{name}"
     agent = {
         "name": "ariadne",
-        "import_path": "benchmark.agent:LiveAgent",
+        "import_path": "benchmark.agent:AriadneAgent",
         "model_name": plan["settings"]["models"]["agent"],
         "kwargs": {"config": plan["settings"]},
     }

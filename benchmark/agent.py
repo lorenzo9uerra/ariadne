@@ -181,7 +181,7 @@ def agent_step(step_id: int, reply: dict, calls: list[dict]) -> Step:
     )
 
 
-class LiveAgent(BaseAgent):
+class AriadneAgent(BaseAgent):
     """Native Harbor agent with Ariadne's controlled tools and spending contract."""
 
     capabilities = AgentCapabilities(atif=True)
@@ -223,7 +223,7 @@ class LiveAgent(BaseAgent):
         from dotenv import load_dotenv
 
         if not isinstance(environment, AriadneDockerEnvironment):
-            raise ValueError("Live agents require Ariadne's verified environment")
+            raise ValueError("The Ariadne agent requires its verified environment")
         environment.require_submission_tool()
         load_dotenv(ROOT / ".env", override=False)
         harness = tomllib.loads((ROOT / "config.toml").read_text())
@@ -285,7 +285,7 @@ class LiveAgent(BaseAgent):
             or self.model is None
             or self.audit is None
         ):
-            raise ValueError("Live agent setup has not completed")
+            raise ValueError("Agent setup has not completed")
         attempt = AgentAttempt(self, environment, instruction, context)
         attempt.persist()
         try:
@@ -315,7 +315,7 @@ STOP_REASONS = (
 class AgentAttempt:
     """One live attempt's state: conversation, trajectory, tools and stop reason."""
 
-    def __init__(self, agent: LiveAgent, environment, instruction: str, context):
+    def __init__(self, agent: AriadneAgent, environment, instruction: str, context):
         assert agent.model is not None and agent.audit is not None
         if agent.backend is None or agent.monitor is None:
             raise ValueError("Reviewed web setup has not completed")

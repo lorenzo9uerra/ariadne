@@ -1,5 +1,5 @@
 # One trial of the task given with -p. The default nop agent submits nothing
-# (unpaid, zero scores); -a oracle or the live agent can replace it.
+# (unpaid, zero scores); -a oracle or the Ariadne agent can replace it.
 n_concurrent_trials: 1
 n_attempts: 1
 retry:

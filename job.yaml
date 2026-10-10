@@ -7,4 +7,4 @@ retry:
 environment:
   import_path: sandbox.environment:AriadneDockerEnvironment
 agents:
-  - import_path: benchmark.agent:LiveAgent
+  - import_path: benchmark.agent:AriadneAgent

@@ -21,16 +21,16 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.progress import Progress
 
-from benchmark.agent import LiveAgent
+from benchmark.agent import AriadneAgent
 from benchmark.budgets import load_draft
 from benchmark.experiment import create_job, job_config
 from benchmark.tasks import ROOT
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
     SAFE,
+    ariadne_agent,
     assert_isolation_and_cleanup,
     export_task,
-    live_agent,
     synthetic_package,
 )
 
@@ -105,7 +105,7 @@ def test_job_template_uses_native_schema_and_explicit_development_mode(dev):
     if dev:
         assert config.agents[0].name == "nop"
     else:
-        assert config.agents[0].import_path == "benchmark.agent:LiveAgent"
+        assert config.agents[0].import_path == "benchmark.agent:AriadneAgent"
     assert (
         config.environment.import_path == "sandbox.environment:AriadneDockerEnvironment"
     )
@@ -116,10 +116,10 @@ def test_live_config_exposes_native_agent_and_model_labels(tmp_path, model):
     from harbor.models.trial.config import AgentConfig
 
     settings = load_draft(model=model)
-    config = AgentConfig.model_validate(live_agent(settings))
+    config = AgentConfig.model_validate(ariadne_agent(settings))
     assert config.name == "ariadne"
     assert config.model_name == settings["models"]["agent"]
-    assert AgentFactory.get_agent_class_from_config(config) is LiveAgent
+    assert AgentFactory.get_agent_class_from_config(config) is AriadneAgent
     job = job_config(
         tmp_path / "task",
         tmp_path / "jobs",
