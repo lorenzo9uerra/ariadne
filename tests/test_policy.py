@@ -313,15 +313,6 @@ def test_submission_can_execute_after_the_full_tool_allowance():
     )
 
 
-def test_monitor_limit_is_separate():
-    counters = Counters(load_draft()["budgets"] | {"monitor_calls": 1})
-    counters.reserve_monitor()
-    counters.charge_monitor(20)
-    with pytest.raises(BudgetExceeded):
-        counters.reserve_monitor()
-    assert counters.proposed == 0
-
-
 def test_batch_cannot_oversubscribe_web_quota():
     s, backend = session(), FakeBackend()
     s.config["budgets"]["web_calls"] = 1
@@ -460,6 +451,7 @@ def test_monitor_budget_covers_full_decisions_with_one_retry_each():
         counters.charge_monitor(request_tokens)
         counters.charge_monitor(request_tokens)
     assert counters.monitor_tokens == limits["monitor_tokens"]
+    assert counters.proposed == 0
     with pytest.raises(BudgetExceeded, match="monitor_calls"):
         counters.reserve_monitor()
 

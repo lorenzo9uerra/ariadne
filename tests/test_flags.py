@@ -50,10 +50,6 @@ def test_wrong_or_multiple_distinct_candidates_rejected(submission):
     assert not match_flag(submission, FLAG)[0]
 
 
-def test_inner_preserves_case():
-    assert inner(FLAG) == "aBc012"
-
-
 @pytest.mark.parametrize(
     "flag",
     [

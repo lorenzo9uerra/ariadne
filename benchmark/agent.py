@@ -6,6 +6,7 @@ import json
 import shlex
 import time
 import tomllib
+from importlib.metadata import version as package_version
 from pathlib import Path
 from string import Template
 
@@ -108,7 +109,7 @@ class ScriptedAgent(BaseAgent):
         return "ariadne-scripted"
 
     def version(self) -> str:
-        return "0.1.0"
+        return package_version("ariadne")
 
     async def setup(self, environment: BaseEnvironment) -> None:
         pass
@@ -361,7 +362,7 @@ class LiveAgent(BaseAgent):
         return "ariadne"
 
     def version(self) -> str:
-        return "0.1.0"
+        return package_version("ariadne")
 
     async def setup(self, environment: BaseEnvironment) -> None:
         import os
@@ -546,6 +547,15 @@ class LiveAgent(BaseAgent):
                     }
                 )
             if result.return_code != 0 or result.stderr:
+                stderr = result.stderr or ""
+                audit.record(
+                    "shell_transport",
+                    f"bash-{session.counters.non_submit}",
+                    status="error",
+                    return_code=result.return_code,
+                    stderr=stderr[:2048],
+                    stderr_truncated=len(stderr) > 2048,
+                )
                 session.stop_reason = "shell_transport_error"
                 raise PolicyStopped("Shell output capture failed")
             return json.dumps(

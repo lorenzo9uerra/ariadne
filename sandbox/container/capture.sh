@@ -11,7 +11,8 @@ capture() {
 }
 capture "$directory/out.pipe" "$directory/out" & out_pid=$!
 capture "$directory/err.pipe" "$directory/err" & err_pid=$!
-/bin/bash --noprofile --norc -c "$1" > "$directory/out.pipe" 2> "$directory/err.pipe"
+# Capture Bash's signal diagnostics alongside the command's stderr.
+{ /bin/bash --noprofile --norc -c "$1"; } > "$directory/out.pipe" 2> "$directory/err.pipe"
 status=$?
 wait "$out_pid" "$err_pid"
 printf '%s\n' "$status"

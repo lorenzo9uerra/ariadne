@@ -11,6 +11,7 @@ from sandbox import docker_host
 def host(monkeypatch):
     monkeypatch.delenv("SANDBOX_PLATFORM", raising=False)
     monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.delenv("SANDBOX_IMAGE_TAG", raising=False)
 
     def use(architecture):
         monkeypatch.setattr(docker_host, "docker_architecture", lambda: architecture)
@@ -27,6 +28,9 @@ def test_matching_and_any_architecture_select_the_host_platform(
 ):
     host(host_architecture)
     assert docker_host.select_platform(required) == expected
+    assert docker_host.os.environ["SANDBOX_IMAGE_TAG"] == docker_host.image_tag(
+        expected
+    )
 
 
 def test_architecture_mismatch_is_refused_instead_of_emulated(host):
@@ -132,15 +136,6 @@ def test_image_tag_covers_every_copied_input_and_the_platform(tmp_path, monkeypa
     assert docker_host.image_tag("linux/arm64") == arm
     (copy / "tool-versions.env").write_text("changed\n")
     assert docker_host.image_tag("linux/arm64") != arm
-
-
-def test_select_platform_names_the_image(host, monkeypatch):
-    monkeypatch.delenv("SANDBOX_IMAGE_TAG", raising=False)
-    host("arm64")
-    docker_host.select_platform("arm64")
-    assert docker_host.os.environ["SANDBOX_IMAGE_TAG"] == docker_host.image_tag(
-        "linux/arm64"
-    )
 
 
 def _docker_runs(monkeypatch, outcomes):

@@ -225,7 +225,28 @@ def test_default_requires_review_and_provisional_does_not(tmp_path):
     assert not run.problems and len(run.attempts) == 3
 
 
-def test_flagged_automatic_review_waits_for_human(tmp_path):
+@pytest.mark.parametrize("human_pending", [False, True])
+def test_unresolved_interruption_cannot_be_previewed_as_a_failure(
+    tmp_path, human_pending
+):
+    folder, events = experiment(tmp_path, counted=human_pending)
+    if human_pending:
+        next(e for e in events if e["event"] == "review")["disposition"] = "pending"
+        write_events(folder, events)
+    else:
+        revise_result(
+            folder,
+            events,
+            lambda r: r["agent_result"]["metadata"].update(
+                stop_reason="shell_transport_error"
+            ),
+        )
+    run = load_runs(folder, provisional=True)[0]
+    assert "slot 1: interruption needs attribution" in run.problems
+    assert len(run.attempts) == 2
+
+
+def test_optional_human_sample_does_not_block_plots(tmp_path):
     folder, events = experiment(tmp_path)
     events[:] = [e for e in events if e["event"] != "review"]
     events.extend(
@@ -247,7 +268,7 @@ def test_flagged_automatic_review_waits_for_human(tmp_path):
         ]
     )
     write_events(folder, events)
-    assert "slot 1: outcome review pending" in load_runs(folder)[0].problems
+    assert "slot 1: outcome review pending" not in load_runs(folder)[0].problems
     events.append(
         {
             "event": "review",

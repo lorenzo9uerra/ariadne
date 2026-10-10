@@ -88,13 +88,13 @@ def test_request_is_reserved_and_routed_before_response(model_factory):
         assert body["max_completion_tokens"] == 16384
         assert "max_tokens" not in body
         assert body["temperature"] == 0
-        return httpx.Response(200, json=completion())
+        return httpx.Response(200, json=completion(prompt_tokens=70000))
 
     model = model_factory(reply)
     result = generate(model)
     assert result["cost_usd"] == 0.001
     assert result["usage"] == {
-        "prompt_tokens": 100,
+        "prompt_tokens": 70000,
         "completion_tokens": 10,
         "cached_tokens": 0,
     }
@@ -314,14 +314,6 @@ def test_context_limit_does_not_send_or_truncate_a_request(model_factory, monkey
     with pytest.raises(ContextLimit):
         generate(model)
     assert model.ledger.totals()["held_usd"] == 0
-
-
-def test_usage_above_old_run_token_limit_is_recorded(model_factory):
-    model = model_factory(
-        lambda request: httpx.Response(200, json=completion(prompt_tokens=70000))
-    )
-    generate(model)
-    assert model.usage["prompt_tokens"] == 70000
 
 
 def test_deadline_stops_before_reserving(model_factory):

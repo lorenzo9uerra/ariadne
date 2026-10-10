@@ -502,6 +502,42 @@ def test_bash_preserves_streams_and_reports_timeout(tmp_path, live_mock, monkeyp
     assert context.metadata["stop_reason"] == "submitted"
 
 
+@pytest.mark.parametrize("return_code,stderr", [(137, ""), (0, "x" * 3000)])
+def test_shell_transport_failure_retains_private_diagnostics_and_stops(
+    tmp_path, live_mock, monkeypatch, return_code, stderr
+):
+    config, replies, seen = live_mock
+    replies.extend(
+        [
+            completion([api_call("bash", {"command": "synthetic command"})]),
+            completion([api_call("submit", {"answer": SAFE})]),
+        ]
+    )
+    environment = environment_stub(tmp_path)
+
+    async def execute(*args, **kwargs):
+        return ExecResult(return_code=return_code, stderr=stderr)
+
+    monkeypatch.setattr(environment, "exec", execute)
+    context, trajectory = run_agent(environment, config)
+    assert context.metadata["stop_reason"] == "shell_transport_error"
+    assert context.metadata["submission_attempted"] is False
+    assert len(seen) == 1
+    entries = [
+        json.loads(line)
+        for line in (environment.trial_paths.trial_dir / "private/audit.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    diagnostic = next(e for e in entries if e["stage"] == "shell_transport")
+    assert diagnostic["return_code"] == return_code
+    assert diagnostic["stderr"] == stderr[:2048]
+    assert diagnostic["stderr_truncated"] == (len(stderr) > 2048)
+    assert "stderr_truncated" not in trajectory.model_dump_json()
+    if stderr:
+        assert stderr[:2048] not in trajectory.model_dump_json()
+
+
 def test_trajectory_retains_model_text_reasoning_tools_and_usage(
     tmp_path, live_mock, monkeypatch
 ):

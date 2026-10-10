@@ -44,10 +44,9 @@ def test_console_errors_redraw_progress_and_keep_file_logs(tmp_path, monkeypatch
     job.config = config
     job.is_resuming = False
     job.job_dir.mkdir()
-    job._init_logger()
-    original = job._console_handler
 
     async def prepared(config):
+        job._init_logger()
         return job
 
     sink = StringIO()
@@ -59,12 +58,12 @@ def test_console_errors_redraw_progress_and_keep_file_logs(tmp_path, monkeypatch
         _environ={"TERM": "xterm-256color"},
     )
     monkeypatch.setattr(Job, "create", prepared)
-    monkeypatch.setattr("rich.logging.get_console", lambda: console)
+    monkeypatch.setattr("benchmark.experiment.get_console", lambda: console)
     try:
         assert asyncio.run(create_job(config)) is job
         assert job._console_handler is not None
         assert job._console_handler.level == logging.DEBUG
-        assert original not in harbor_logger.handlers
+        assert job._console_handler in harbor_logger.handlers
         overall = Progress(console=console)
         current = Progress(console=console)
         with Live(

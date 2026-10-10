@@ -6,7 +6,10 @@ and reviewed-web attempts, with a logarithmic horizontal axis. It produces SVG
 and PNG figures, a CSV of their values and a source manifest for checking which
 attempts contributed.
 
-Run it from the repository root after completing execution and outcome review:
+Run it from the repository root after completing execution and AI-assisted
+outcome assessment. Optional human audit samples do not block these plots;
+unresolved validity or contamination findings do. Use `--provisional` for raw
+outcomes while assessment is pending:
 
 ```sh
 uv run --project analysis analysis/plot_results.py \
@@ -71,8 +74,9 @@ positive number.
 Use `--provisional --output logs/plots/provisional` for a preview once all
 selected attempts have finished. It plots **raw pass@1** and labels every
 figure and CSV row as provisional, because contamination and scope decisions
-may still change the result. An unreviewed exception still needs attribution
-before it can be included. Previewing does not create or approve review records.
+may still change the result. Exceptions, nonstandard interruptions and attempts
+explicitly marked pending still need attribution before inclusion. Previewing
+does not create or approve review records.
 
 These are Ariadne measurements, not an Artificial Analysis Intelligence Index.
 The per-attempt resource comparisons follow a similar presentation to
