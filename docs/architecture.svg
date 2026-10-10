@@ -29,8 +29,8 @@
   <text x="131" y="132">Harbor + agent loop</text>
   <text x="369" y="132">Web tools + reviewer</text>
   <path class="arrow" d="M 225 125 H 275" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-  <text x="250" y="167">Tool checks</text>
-  <text x="250" y="192">Expected answers, API keys, records</text>
+  <text x="250" y="167">Enforces limits and web review</text>
+  <text x="250" y="192">Keeps API keys, expected answers, records</text>
 
   <rect class="host" x="12" y="274" width="476" height="260" rx="6"/>
   <rect class="paper" x="181" y="262" width="138" height="26"/>
@@ -48,6 +48,7 @@
 
   <rect class="container" x="266" y="300" width="206" height="56" rx="4"/>
   <text class="title" x="369" y="335">Verifier container</text>
+  <text class="note" x="369" y="380">(after the agent exits)</text>
 
   <path class="arrow" d="M 131 356 V 428" marker-end="url(#arrow)"/>
   <rect class="paper" x="64" y="378" width="134" height="26"/>
@@ -55,5 +56,5 @@
   <rect class="container" x="28" y="428" width="206" height="70" rx="4"/>
   <text class="title" x="131" y="457">Target container</text>
   <text class="note" x="131" y="481">(service tasks only)</text>
-  <text class="note" x="250" y="522">(containers: no internet or host mounts)</text>
+  <text class="note" x="250" y="522">Containers have no internet or host mounts</text>
 </svg>
