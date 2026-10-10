@@ -88,10 +88,10 @@ def job_config(
         limits = (settings or agent.get("kwargs", {}).get("config") or load_draft())[
             "budgets"
         ]
-        # Let the agent save its timeout record before Harbor cancels it.
-        data["agents"] = [
-            {**agent, "override_timeout_sec": limits["elapsed_seconds"] + 5}
-        ]
+        # Rate-limit waits can extend the attempt; leave the agent time to save
+        # its timeout record before Harbor cancels it.
+        allowed = limits["elapsed_seconds"] + limits["rate_limit_wait_seconds"]
+        data["agents"] = [{**agent, "override_timeout_sec": allowed + 5}]
     return JobConfig.model_validate(data)
 
 

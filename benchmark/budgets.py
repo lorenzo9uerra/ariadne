@@ -1,6 +1,8 @@
 """Per-attempt quota accounting. No awaits occur while reserving a quota."""
 
+import asyncio
 import copy
+import time
 import tomllib
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -9,6 +11,31 @@ from pathlib import Path
 
 class BudgetExceeded(RuntimeError):
     pass
+
+
+class AttemptClock:
+    """An attempt's time limit. Waiting out provider rate limits extends it, up to
+    an allowance, so the agent is not charged for the provider's capacity."""
+
+    def __init__(self, seconds: float, rate_limit_allowance: float = 0):
+        self.started = time.monotonic()
+        self.deadline = self.started + seconds
+        self.allowance = rate_limit_allowance
+        self.excluded = 0.0
+        # The asyncio timeout around the attempt, moved along with the deadline.
+        self.timeout: asyncio.Timeout | None = None
+
+    def remaining(self) -> float:
+        return self.deadline - time.monotonic()
+
+    def exclude(self, seconds: float) -> None:
+        """Stop the clock for a rate-limit wait while the allowance lasts."""
+        granted = max(0.0, min(seconds, self.allowance - self.excluded))
+        self.excluded += granted
+        self.deadline += granted
+        when = self.timeout.when() if self.timeout is not None else None
+        if granted and self.timeout is not None and when is not None:
+            self.timeout.reschedule(when + granted)
 
 
 def load_draft(

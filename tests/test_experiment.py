@@ -839,7 +839,8 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
     folder = next((tmp_path / "logs/experiments").iterdir())
     plan = experiment.read_plan(folder)
     assert plan["settings"] == seen[0]
-    assert all(config.agents[0].override_timeout_sec == 1805 for config in harness[3])
+    # The 1,800 s override plus the 900 s rate-limit allowance and 5 s to save.
+    assert all(config.agents[0].override_timeout_sec == 2705 for config in harness[3])
 
 
 def test_review_backend_failure_stops_batch_and_retry_preserves_evidence(reviewed):
