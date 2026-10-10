@@ -254,24 +254,31 @@ def test_native_batch_checks_each_result_before_starting_another(
         assert ended[-1]["status"] == "error"
 
 
-@pytest.mark.parametrize("interrupted", [False, True])
-def test_shared_execution_stops_on_infrastructure_errors_but_keeps_valid_failures(
-    harness, tmp_path, monkeypatch, interrupted
-):
+@pytest.mark.parametrize("case", ["valid", "interrupted", "evidence"])
+def test_jobs_stop_only_when_trial_evidence_fails(harness, tmp_path, monkeypatch, case):
     monkeypatch.setattr(experiment, "check_result", check_result)
+    if case == "evidence":
+
+        def failed(trial):
+            raise RuntimeError("Isolation or cleanup evidence failed")
+
+        monkeypatch.setattr(experiment, "isolation_evidence", failed)
     package, settings, outcomes, configs = harness
-    outcomes.extend([None] if interrupted else [dict.fromkeys(METRICS, 0)] * 3)
+    outcomes.extend([None] if case == "interrupted" else [dict.fromkeys(METRICS, 0)])
     execution = experiment.run_experiment(
         [package], tmp_path / "jobs", settings=settings
     )
-    if interrupted:
-        with pytest.raises(RuntimeError, match="Trial interrupted"):
+    if case == "evidence":
+        with pytest.raises(RuntimeError, match="evidence failed"):
             asyncio.run(execution)
     else:
+        # An interrupted trial is reviewed later; Harbor finishes the job.
         asyncio.run(execution)
     assert len(configs) == 1
     folder = next((tmp_path / "logs/experiments").iterdir())
-    assert len(experiment.report(folder)["attempts"]) == (1 if interrupted else 3)
+    assert len(experiment.report(folder)["attempts"]) == (
+        1 if case == "evidence" else 3
+    )
 
 
 def test_experiments_share_native_job_directory_without_overwriting(harness, tmp_path):
@@ -839,7 +846,7 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
     folder = next((tmp_path / "logs/experiments").iterdir())
     plan = experiment.read_plan(folder)
     assert plan["settings"] == seen[0]
-    # The 1,800 s override plus the 900 s rate-limit allowance and 5 s to save.
+    # The 1,800 s override plus the 900 s retry-wait allowance and 5 s to save.
     assert all(config.agents[0].override_timeout_sec == 2705 for config in harness[3])
 
 
@@ -1060,8 +1067,7 @@ def test_pending_billing_does_not_bypass_failed_isolation(tmp_path):
 
 
 def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
-    tmp_path,
-    monkeypatch,
+    tmp_path, monkeypatch, capsys
 ):
     audit = tmp_path / "private/audit.jsonl"
     audit.parent.mkdir()
@@ -1076,7 +1082,12 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
         )
         + "\n"
     )
+    for role in ("agent", "verifier"):
+        (tmp_path / f"security-{role}.json").write_text(
+            json.dumps({"checks": {"ok": True}, "cleanup_requested": True})
+        )
     row = {
+        "attempt": "synthetic",
         "path": str(tmp_path / "result.json"),
         "exception_type": None,
         "stop_reason": "elapsed_seconds",
@@ -1086,8 +1097,8 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
     }
     monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
     assert len(experiment.open_slots(tmp_path, TASK)) == 1
-    with pytest.raises(RuntimeError, match="API retry backoff"):
-        experiment.check_result(row)
+    experiment.check_result(row)  # Flagged for review; the job continues.
+    assert "ended during API retry backoff" in capsys.readouterr().out
 
 
 def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(

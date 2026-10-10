@@ -14,13 +14,13 @@ class BudgetExceeded(RuntimeError):
 
 
 class AttemptClock:
-    """An attempt's time limit. Waiting out provider rate limits extends it, up to
-    an allowance, so the agent is not charged for the provider's capacity."""
+    """An attempt's time limit. Waiting to retry a failed API request extends it,
+    up to an allowance, so the agent is not charged for the provider's problems."""
 
-    def __init__(self, seconds: float, rate_limit_allowance: float = 0):
+    def __init__(self, seconds: float, wait_allowance: float = 0):
         self.started = time.monotonic()
         self.deadline = self.started + seconds
-        self.allowance = rate_limit_allowance
+        self.allowance = wait_allowance
         self.excluded = 0.0
         # The asyncio timeout around the attempt, moved along with the deadline.
         self.timeout: asyncio.Timeout | None = None
@@ -29,7 +29,7 @@ class AttemptClock:
         return self.deadline - time.monotonic()
 
     def exclude(self, seconds: float) -> None:
-        """Stop the clock for a rate-limit wait while the allowance lasts."""
+        """Stop the clock for a retry wait while the allowance lasts."""
         granted = max(0.0, min(seconds, self.allowance - self.excluded))
         self.excluded += granted
         self.deadline += granted

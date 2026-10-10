@@ -329,7 +329,7 @@ class AgentAttempt:
         self.model, self.audit = agent.model, agent.audit
         self.limits = agent.config["budgets"]
         self.clock = AttemptClock(
-            self.limits["elapsed_seconds"], self.limits["rate_limit_wait_seconds"]
+            self.limits["elapsed_seconds"], self.limits["provider_wait_seconds"]
         )
         self.session = Session(
             agent.config,
@@ -521,7 +521,7 @@ class AgentAttempt:
             "reviewer_context_sha256": session.context_hash,
             "submission_attempted": session.submission_attempted,
             "elapsed_seconds": time.monotonic() - self.clock.started,
-            "rate_limit_wait_seconds": self.clock.excluded,
+            "provider_wait_seconds": self.clock.excluded,
             "spending": spending,
             "audit_path": str(self.audit.path),
         }

@@ -56,13 +56,13 @@ def model_factory(tmp_path, monkeypatch):
     return create
 
 
-def generate(model, messages=None, *, deadline_seconds=5, rate_limit_allowance=0):
+def generate(model, messages=None, *, deadline_seconds=5, wait_allowance=0):
     async def run():
         await model.check_route()
         return await model.generate(
             messages or [{"role": "user", "content": "Synthetic record"}],
             [],
-            AttemptClock(deadline_seconds, rate_limit_allowance),
+            AttemptClock(deadline_seconds, wait_allowance),
         )
 
     return asyncio.run(run())
@@ -260,32 +260,34 @@ def test_backoff_and_optional_attempt_cap(
     assert model.ledger.totals()["billed_usd"] == 0.001
 
 
-def test_rate_limit_wait_beyond_the_allowance_counts_against_the_attempt(
+def test_retry_wait_beyond_the_allowance_counts_against_the_attempt(
     model_factory,
 ):
     model = model_factory(lambda request: httpx.Response(429), attempt_limit=None)
     model.config["live"]["rate_limit_retry_initial_seconds"] = 30
     model.config["live"]["rate_limit_retry_max_seconds"] = 120
     with pytest.raises(TimeoutError, match="retry backoff"):
-        generate(model, deadline_seconds=20, rate_limit_allowance=5)
+        generate(model, deadline_seconds=20, wait_allowance=5)
     assert len(model.audit.items) == 1
     assert model.ledger.totals()["held_usd"] > 0
 
 
-def test_rate_limit_wait_within_the_allowance_stops_the_clock(
-    model_factory, monkeypatch
+@pytest.mark.parametrize("status", [429, 503])
+def test_retry_wait_within_the_allowance_stops_the_clock(
+    model_factory, monkeypatch, status
 ):
-    replies = iter([httpx.Response(429), httpx.Response(200, json=completion())])
+    replies = iter([httpx.Response(status), httpx.Response(200, json=completion())])
     model = model_factory(lambda request: next(replies), attempt_limit=None)
-    model.config["live"]["rate_limit_retry_initial_seconds"] = 30
-    model.config["live"]["rate_limit_retry_max_seconds"] = 120
+    for prefix in ("rate_limit_retry", "retry"):
+        model.config["live"][f"{prefix}_initial_seconds"] = 30
+        model.config["live"][f"{prefix}_max_seconds"] = 120
     waits = []
 
     async def sleep(delay):
         waits.append(delay)
 
     monkeypatch.setattr("benchmark.model.asyncio.sleep", sleep)
-    clock = AttemptClock(20, rate_limit_allowance=60)
+    clock = AttemptClock(20, wait_allowance=60)
 
     async def run():
         await model.check_route()
@@ -620,7 +622,7 @@ def test_retry_after_cannot_extend_attempt_deadline(model_factory):
 
 def test_excluded_wait_also_moves_the_attempt_timeout():
     async def run():
-        clock = AttemptClock(0.05, rate_limit_allowance=1)
+        clock = AttemptClock(0.05, wait_allowance=1)
         async with asyncio.timeout(0.05) as limit:
             clock.timeout = limit
             clock.exclude(0.2)

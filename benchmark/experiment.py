@@ -88,9 +88,9 @@ def job_config(
         limits = (settings or agent.get("kwargs", {}).get("config") or load_draft())[
             "budgets"
         ]
-        # Rate-limit waits can extend the attempt; leave the agent time to save
+        # API retry waits can extend the attempt; leave the agent time to save
         # its timeout record before Harbor cancels it.
-        allowed = limits["elapsed_seconds"] + limits["rate_limit_wait_seconds"]
+        allowed = limits["elapsed_seconds"] + limits["provider_wait_seconds"]
         data["agents"] = [{**agent, "override_timeout_sec": allowed + 5}]
     return JobConfig.model_validate(data)
 
@@ -409,20 +409,26 @@ def check_job(job: Path | None = None) -> list[str]:
 
 
 def check_result(row: dict | None) -> None:
-    """Stop an experiment at the first trial that needs review or failed its checks."""
-    if row is not None and "attempt" in row:
-        print(f"Finished attempt {row['attempt']}", flush=True)
-    if row is None or row["exception_type"] or row["stop_reason"] not in ORDINARY:
-        raise RuntimeError("Trial interrupted; attribute the failure before resuming")
-    if retry_interruption(row):
-        raise RuntimeError(
-            "Trial ended during API retry backoff; review the external failure before replacing it"
-        )
+    """Stop the job only when a trial's isolation or cleanup evidence failed.
+
+    Other problems, such as an interrupted trial or a timeout during API retries,
+    let Harbor finish the job; they are reviewed afterwards and resumed.
+    """
+    if row is None:
+        raise RuntimeError("No attempt was recorded for the finished trial")
+    print(f"Finished attempt {row['attempt']}", flush=True)
     isolation_evidence(Path(row["path"]).parent)
+    if row["exception_type"] or row["stop_reason"] not in ORDINARY:
+        print(f"Attempt {row['attempt']} was interrupted; review it", flush=True)
+    elif retry_interruption(row):
+        print(
+            f"Attempt {row['attempt']} ended during API retry backoff; review it",
+            flush=True,
+        )
     if row["cost_usd"] is None or row["held_usd"] != 0:
         print(
             f"Billing pending for attempt {row['attempt']}; reservations retained. "
-            "Continuing execution; cost totals remain incomplete.",
+            "Cost totals remain incomplete.",
             flush=True,
         )
 

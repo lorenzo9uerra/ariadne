@@ -403,11 +403,10 @@ class OpenRouterModel:
     async def _backoff(self, entry: dict, attempt: int, clock: AttemptClock) -> None:
         """Exponential backoff, slower for rate limits, at least any Retry-After.
 
-        A rate-limit wait stops the attempt's clock while its allowance lasts.
+        The wait stops the attempt's clock while its allowance lasts.
         """
         live = self.config["live"]
-        rate_limited = entry.get("http_status") == 429
-        prefix = "rate_limit_retry" if rate_limited else "retry"
+        prefix = "rate_limit_retry" if entry.get("http_status") == 429 else "retry"
         delay = min(
             live.get(f"{prefix}_initial_seconds", live["retry_initial_seconds"])
             * 2**attempt,
@@ -416,8 +415,7 @@ class OpenRouterModel:
         delay = max(delay, entry.get("retry_after_seconds", 0))
         entry["retry_wait_seconds"] = delay
         self.audit.publish(entry)
-        if rate_limited:
-            clock.exclude(delay)
+        clock.exclude(delay)
         if delay >= clock.remaining():
             raise TimeoutError("Attempt deadline reached during retry backoff")
         await asyncio.sleep(delay)

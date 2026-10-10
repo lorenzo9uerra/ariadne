@@ -315,9 +315,11 @@ agent; it is not an access-control mechanism for people using the host.
 
 `python -m benchmark run` freezes the settings and input hashes, then starts
 one native Harbor job that runs three fresh trials of each task. Harbor's trial
-hooks write each attempt to the journal and check its result; a failed check
-stops the job before the next trial starts. Ariadne refuses to continue if the
-frozen inputs change. New trajectories record the installed framework release;
+hooks write each attempt to the journal and check its result. Failed isolation
+or cleanup evidence stops the job before the next trial starts; any other
+problem, such as an interrupted trial, is flagged for review and the job
+continues, so Harbor's records stay complete. Ariadne refuses to continue if
+the frozen inputs change. New trajectories record the installed framework release;
 frozen input hashes and implementation records identify the code and settings
 used. Earlier trajectories may carry the adapter's fixed `0.1.0` label, so use
 their retained hashes when distinguishing implementations.
@@ -358,10 +360,10 @@ The journal records dispositions and the `--contaminated` and
 results under the [scoring rules](benchmark_protocol.md#13-reporting); unresolved validity or contamination findings prevent a complete adjusted
 score. Optional audits do not block it; raw scores can be provisional. Native rewards are never rewritten.
 
-When a check stops an experiment, review the stopped trial, then resume. For
-each task, `resume` replaces every reviewed failure with a new trial in the
-same slot, then runs the slots that never ran in one Harbor job; an unreviewed
-failure stops it. `replace` reruns a single reviewed attempt:
+After an experiment, review its flagged trials, then resume. For each task,
+`resume` replaces every reviewed failure with a new trial in the same slot,
+then runs the slots that never ran in one Harbor job; an unreviewed failure
+stops it. `replace` reruns a single reviewed attempt:
 
 ```sh
 uv run python -m benchmark resume logs/experiments/EXPERIMENT
