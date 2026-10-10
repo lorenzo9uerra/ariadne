@@ -242,14 +242,23 @@ uv run python -m benchmark.experiment run --task rev-01 \
 ```
 
 Each command runs an experiment with three independent attempts per task,
-all three even after a solve. It starts one Harbor job per task from
+all three even after a solve. It starts one native Harbor job from
 `job.yaml`; running that file directly with `harbor run` would skip the frozen
 plan and review records. Native Harbor jobs go directly under `jobs/`, with
 names identifying the model and task. Frozen settings, input hashes and review
 records are kept under `logs/experiments/`; each experiment's `summary.json`
-stays pending until every attempt is reviewed. Pass several task
-names after `--task` to include them in one experiment. Omitting `--model` uses
-the configured baseline.
+stays pending until every attempt is reviewed. Pass several task names after
+`--task` to include them in one experiment. Omitting `--model` uses the
+configured baseline.
+
+A trial that ends on an infrastructure problem, such as a provider outage,
+stops the experiment. Record a review decision for it
+([Review an experiment](#review-an-experiment)), then continue; reviewed
+failures are rerun in their slots and the remaining trials run as planned:
+
+```sh
+uv run python -m benchmark.experiment resume logs/experiments/EXPERIMENT
+```
 
 Open all jobs in Harbor View:
 

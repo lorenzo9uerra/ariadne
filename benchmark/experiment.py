@@ -66,7 +66,7 @@ async def create_job(config: JobConfig) -> Job:
 
 
 def job_config(
-    task: Path,
+    tasks: list[Path],
     jobs_dir: Path,
     agent: dict,
     *,
@@ -81,7 +81,7 @@ def job_config(
     if not dev and data["n_attempts"] != count:
         raise ValueError("Job template and approved repetition settings disagree")
     data.update(
-        tasks=[{"path": str(task)}],
+        tasks=[{"path": str(task)} for task in tasks],
         jobs_dir=str(jobs_dir),
         agents=[agent],
         n_attempts=count if attempts is None else attempts,
@@ -182,15 +182,14 @@ def collect(folder: Path, job_name: str) -> None:
 
 
 def _planned_job(
-    plan: dict, item: dict, slots: list[int], replaces
+    plan: dict, items: list[dict], slots: list[int] | None, replaces
 ) -> tuple[str, JobConfig]:
-    """The Harbor job for some of a task's slots: all of them, the rest, or one."""
-    name = item["name"]
-    if replaces:
-        name = f"{name}-replacement-{slots[0]}-{uuid4().hex[:8]}"
-    elif len(slots) < item["attempts"]:
+    """One Harbor job: every slot of the given tasks, or some slots of one task."""
+    name = "-".join(item["name"] for item in items)
+    if slots is not None:
+        kind = "replacement" if replaces else "slots"
         numbers = "-".join(map(str, slots))
-        name = f"{name}-slots-{numbers}-{uuid4().hex[:8]}"
+        name = f"{name}-{kind}-{numbers}-{uuid4().hex[:8]}"
     name = f"{plan['job_prefix']}-{name}"
     agent = {
         "name": "ariadne",
@@ -199,13 +198,14 @@ def _planned_job(
         "kwargs": {"config": plan["settings"]},
     }
     config = job_config(
-        Path(item["task"]),
+        [Path(item["task"]) for item in items],
         Path(plan["jobs_dir"]),
         agent,
         dev=plan["development"],
         settings=plan["settings"],
         name=name,
-        attempts=len(slots),
+        # Harbor runs n_attempts trials of each task.
+        attempts=items[0]["attempts"] if slots is None else len(slots),
     )
     return name, config
 
@@ -213,16 +213,16 @@ def _planned_job(
 async def execute_job(
     folder: Path,
     plan: dict,
-    item: dict,
+    items: list[dict],
     *,
     slots: list[int] | None = None,
     replaces=None,
     allow_fix=False,
     on_trial_result: Callable[[dict], None] | None = None,
 ) -> None:
-    """Run one Harbor job for the given slots (default: all of the task's).
+    """Run one native Harbor job: every slot of the given tasks, or some of one's.
 
-    Harbor runs one trial per slot; the journal records each as it starts and ends.
+    Harbor runs the trials; its hooks journal each as it starts and ends.
 
     on_trial_result, if given, checks each finished trial; an exception there
     stops the job before its next trial creates an environment.
@@ -233,32 +233,37 @@ async def execute_job(
         raise ValueError(
             "Implementation changed; review a fix or start a new experiment"
         )
-    slots = slots or list(range(1, item["attempts"] + 1))
-    name, config = _planned_job(plan, item, slots, replaces)
+    if slots is not None and len(items) != 1:
+        raise ValueError("Select slots of one task")
+    if len({item["attempts"] for item in items}) != 1:
+        raise ValueError("Tasks in one job need the same attempt count")
+    name, config = _planned_job(plan, items, slots, replaces)
+    by_task = {str(Path(item["task"]).resolve()): item for item in items}
+    open_slots = {
+        item["name"]: list(slots or range(1, item["attempts"] + 1)) for item in items
+    }
     with journal(folder) as (_, append):
         append(
             "job_started",
             job=name,
-            planned_job=item["name"],
+            planned_jobs=list(open_slots),
             implementation=current_implementation,
             slots=slots,
             replaces=replaces,
         )
-    started_trials = 0
     trial_error = None
 
     async def started(event):
-        nonlocal started_trials
         if trial_error is not None:
             raise trial_error
         verify_inputs(plan)
         if implementation() != current_implementation:
             raise ValueError("Implementation changed during the job")
-        started_trials += 1
-        if started_trials > len(slots):
+        item = by_task[str(Path(event.config.task.path).resolve())]
+        if not open_slots[item["name"]]:
             raise ValueError("Native job exceeded the planned attempt count")
-        # Harbor starts trials one at a time; each takes the next open slot.
-        assigned = slots[started_trials - 1]
+        # Each trial takes its task's next open slot.
+        assigned = open_slots[item["name"]].pop(0)
         result = event.config.trials_dir / event.trial_name / "result.json"
         with journal(folder) as (_, append):
             append(
@@ -445,7 +450,8 @@ def checked_result(folder, row):
 
 
 async def resume_experiment(folder: Path, task=None) -> None:
-    """For each task, replace reviewed failures, then run the slots that never ran."""
+    """Recover a stopped experiment: for each task, replace reviewed failures,
+    then run the slots that never ran."""
     for item in read_plan(folder)["jobs"]:
         if task is not None and item["challenge"] != task:
             continue
@@ -475,7 +481,7 @@ async def resume_experiment(folder: Path, task=None) -> None:
                 await execute_job(
                     folder,
                     read_plan(folder),
-                    item,
+                    [item],
                     slots=never_ran,
                     on_trial_result=lambda row: checked_result(folder, row),
                 )
@@ -507,8 +513,15 @@ async def run_experiment(
         dev=dev,
         seed=seed,
     )
+    plan = read_plan(folder)
+    print(f"Running {', '.join(item['name'] for item in plan['jobs'])}", flush=True)
     try:
-        await resume_experiment(folder)
+        await execute_job(
+            folder,
+            plan,
+            plan["jobs"],
+            on_trial_result=lambda row: checked_result(folder, row),
+        )
     finally:
         report(folder)
     return folder
@@ -542,16 +555,16 @@ async def _replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
             and event["planned_job"] == planned_job
             and event["slot"] == slot
         ]
-        original = attempts[-1]["attempt"] if attempts else None
+        if not attempts:
+            raise ValueError("No attempt to replace; resume runs slots that never ran")
+        original = attempts[-1]["attempt"]
         decisions = [
             event
             for event in events
             if event["event"] == "review" and event["attempt"] == original
         ]
         decision = decisions[-1] if decisions else None
-        if original is not None and (
-            not decision or decision["disposition"] in ("counted", "pending")
-        ):
+        if not decision or decision["disposition"] in ("counted", "pending"):
             raise ValueError(
                 "Replacement requires reviewed external, setup or implementation failure"
             )
@@ -569,13 +582,6 @@ async def _replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
             and implementation() != decision["fixed_implementation"]
         ):
             raise ValueError("Implementation changed since the fix was reviewed")
-        if original is None and not any(
-            event["event"] == "job_ended" and event["job"] == planned_job
-            for event in events
-        ):
-            raise ValueError(
-                "Missing slots can be filled only after their planned job ends"
-            )
         append(
             "replacement_requested",
             planned_job=planned_job,
@@ -586,7 +592,7 @@ async def _replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
         await execute_job(
             folder,
             plan,
-            item,
+            [item],
             slots=[slot],
             replaces=original,
             allow_fix=bool(
@@ -650,6 +656,11 @@ def main() -> None:
         action="store_true",
         help="Retry failed review calls; keep their original reports",
     )
+    resume = commands.add_parser(
+        "resume",
+        help="Continue a stopped experiment: replace reviewed failures, run open slots",
+    )
+    resume.add_argument("experiment", type=Path)
     rerun = commands.add_parser("replace", help="Rerun a reviewed failed attempt")
     rerun.add_argument("experiment", type=Path)
     rerun.add_argument("--job", required=True)
@@ -681,6 +692,8 @@ def main() -> None:
             )
         elif args.command == "autoreview":
             asyncio.run(autoreview_experiment(folder, retry_failed=args.retry_failed))
+        elif args.command == "resume":
+            asyncio.run(resume_experiment(folder))
         elif args.command == "replace":
             asyncio.run(replace_attempt(folder, args.job, args.slot))
     except (ValueError, OSError, RuntimeError) as error:

@@ -698,6 +698,6 @@ def ariadne_agent(settings: dict | None = None) -> dict:
 
 
 async def run_job(task: Path, jobs_dir: Path, agent: dict, *, dev=False):
-    config = job_config(task, jobs_dir, agent, dev=dev)
+    config = job_config([task], jobs_dir, agent, dev=dev)
     job = await create_job(config)
     return await job.run(), config.jobs_dir / config.job_name

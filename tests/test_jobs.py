@@ -37,7 +37,7 @@ from tests.support import (
 
 def test_console_errors_redraw_progress_and_keep_file_logs(tmp_path, monkeypatch):
     config = job_config(
-        tmp_path / "task", tmp_path, {"name": "nop"}, name="console-check", dev=True
+        [tmp_path / "task"], tmp_path, {"name": "nop"}, name="console-check", dev=True
     )
     config.debug = True
     job = object.__new__(Job)
@@ -121,7 +121,7 @@ def test_live_config_exposes_native_agent_and_model_labels(tmp_path, model):
     assert config.model_name == settings["models"]["agent"]
     assert AgentFactory.get_agent_class_from_config(config) is AriadneAgent
     job = job_config(
-        tmp_path / "task",
+        [tmp_path / "task"],
         tmp_path / "jobs",
         config.model_dump(),
         settings=settings,

@@ -312,10 +312,11 @@ agent; it is not an access-control mechanism for people using the host.
 
 ## Experiments, reviews and scores
 
-`benchmark.experiment run` creates one Harbor job per task, with three fresh
-trials each. `benchmark/experiment.py` freezes the settings and input hashes
-before execution, and refuses to continue if
-those inputs change. New trajectories record the installed framework release;
+`benchmark.experiment run` freezes the settings and input hashes, then starts
+one native Harbor job that runs three fresh trials of each task. Harbor's trial
+hooks write each attempt to the journal and check its result; a failed check
+stops the job before the next trial starts. Ariadne refuses to continue if the
+frozen inputs change. New trajectories record the installed framework release;
 frozen input hashes and implementation records identify the code and settings
 used. Earlier trajectories may carry the adapter's fixed `0.1.0` label, so use
 their retained hashes when distinguishing implementations.
@@ -329,7 +330,7 @@ experiment.
 ```text
 frozen plan (tasks, settings, seed)
     |
-    +-> one job per task: 3 fresh trials -> native results and trajectories
+    +-> one Harbor job: 3 fresh trials per task -> native results and trajectories
                                                        |
                                                   review journal
                                                        |
@@ -356,9 +357,13 @@ The journal records dispositions and the `--contaminated` and
 results under the [scoring rules](benchmark_protocol.md#13-reporting); unresolved validity or contamination findings prevent a complete adjusted
 score. Optional audits do not block it; raw scores can be provisional. Native rewards are never rewritten.
 
-For a reviewed, replaceable failure, run a new trial in the same slot:
+When a check stops an experiment, review the stopped trial, then resume. For
+each task, `resume` replaces every reviewed failure with a new trial in the
+same slot, then runs the slots that never ran in one Harbor job; an unreviewed
+failure stops it. `replace` reruns a single reviewed attempt:
 
 ```sh
+uv run python -m benchmark.experiment resume logs/experiments/EXPERIMENT
 uv run python -m benchmark.experiment replace logs/experiments/EXPERIMENT --job TASK_ID --slot 1
 ```
 

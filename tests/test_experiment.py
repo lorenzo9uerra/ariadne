@@ -79,11 +79,15 @@ def harness(tmp_path, monkeypatch):
 
         async def run(self):
             assert self.callback is not None
-            for _ in range(self.config.n_attempts):
+            # Harbor runs n_attempts trials of each task.
+            trials = [
+                t for t in self.config.tasks for _ in range(self.config.n_attempts)
+            ]
+            for task in trials:
                 trial_id = uuid4()
                 name = f"task__{trial_id.hex[:8]}"
                 config = TrialConfig(
-                    task=self.config.tasks[0],
+                    task=task,
                     trial_name=name,
                     trials_dir=self.config.jobs_dir / self.config.job_name,
                     agent=self.config.agents[0],
@@ -234,7 +238,7 @@ def test_native_batch_checks_each_result_before_starting_another(
             raise RuntimeError("Synthetic infrastructure interruption")
 
     execution = experiment.execute_job(
-        folder, plan, plan["jobs"][0], on_trial_result=check
+        folder, plan, plan["jobs"][:1], on_trial_result=check
     )
     with pytest.raises(RuntimeError, match="infrastructure interruption"):
         asyncio.run(execution)
@@ -306,7 +310,7 @@ def test_json_components_contamination_and_scope_are_per_attempt(harness, tmp_pa
 
 
 def test_equal_task_weights_and_category_means(harness, tmp_path):
-    package, settings, outcomes, _ = harness
+    package, settings, outcomes, configs = harness
     flag = synthetic_package(tmp_path / "flag")
     flag.manifest.update(id="synthetic-flag", answer_type="flag", category="rev")
     outcomes.extend([dict.fromkeys(METRICS, 1)] * 3 + [{"flag_correct": 0}] * 3)
@@ -317,6 +321,8 @@ def test_equal_task_weights_and_category_means(harness, tmp_path):
             settings=settings,
         )
     )
+    # One native job runs every task's attempts.
+    assert len(configs) == 1 and len(configs[0].tasks) == 2
     for row in experiment.report(folder)["attempts"]:
         count(folder, row["attempt"])
     report = experiment.report(folder)
@@ -982,7 +988,8 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
 
-    async def execute(folder, plan, item, *, slots=None, on_trial_result=None):
+    async def execute(folder, plan, items, *, slots=None, on_trial_result=None):
+        (item,) = items
         calls.append(slots)
         for assigned in slots or range(1, item["attempts"] + 1):
             trial = tmp_path / f"trial-{assigned}"
@@ -1007,7 +1014,7 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     monkeypatch.setattr(experiment, "execute_job", execute)
     monkeypatch.setattr(experiment, "report", lambda folder: None)
     if partial:
-        asyncio.run(execute(tmp_path, {}, item, slots=[1]))
+        asyncio.run(execute(tmp_path, {}, [item], slots=[1]))
         calls.clear()
     asyncio.run(experiment.resume_experiment(tmp_path, "task"))
     # One native job for the open slots: the rest after a partial run, or all three.
@@ -1114,10 +1121,33 @@ def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
     async def replace(folder, name, slot):
         calls.append(("replace", slot))
 
-    async def execute(folder, plan, item, *, slots=None, on_trial_result=None):
+    async def execute(folder, plan, items, *, slots=None, on_trial_result=None):
         calls.append(("run", slots))
 
     monkeypatch.setattr(experiment, "replace_attempt", replace)
     monkeypatch.setattr(experiment, "execute_job", execute)
     asyncio.run(experiment.resume_experiment(tmp_path))
     assert calls == [("replace", 1), ("run", [2, 3])]
+
+
+def test_resume_command_continues_the_experiment(harness, tmp_path, monkeypatch):
+    folder = run(harness, tmp_path)
+    resumed = []
+
+    async def resume(path, task=None):
+        resumed.append(path)
+
+    monkeypatch.setattr(experiment, "resume_experiment", resume)
+    monkeypatch.setattr(sys, "argv", ["experiment", "resume", str(folder)])
+    experiment.main()
+    assert resumed == [folder.resolve()]
+
+
+def test_replace_refuses_a_slot_without_an_attempt(harness, tmp_path):
+    package, settings, _, _ = harness
+    folder = tmp_path / "unrun"
+    experiment.create_plan(
+        [package], folder, settings=settings, jobs_dir=tmp_path / "jobs"
+    )
+    with pytest.raises(ValueError, match="resume runs slots that never ran"):
+        asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
