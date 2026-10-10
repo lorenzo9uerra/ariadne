@@ -1,7 +1,7 @@
 services:
   default:
-    # The runner selects a shared image tagged by its build inputs.
-    image: ariadne-sandbox:${SANDBOX_IMAGE_TAG:?set by the runner from the image inputs}
+    # The environment selects a shared image tagged by its build inputs.
+    image: ariadne-sandbox:${SANDBOX_IMAGE_TAG:?set by the environment from the image inputs}
     platform: ${SANDBOX_PLATFORM:-linux/arm64}
     init: true
     hostname: workspace

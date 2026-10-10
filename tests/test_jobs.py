@@ -24,13 +24,13 @@ from rich.progress import Progress
 from benchmark.agent import LiveAgent
 from benchmark.budgets import load_draft
 from benchmark.experiment import create_job, job_config
-from benchmark.runner import agent_config
 from benchmark.tasks import ROOT
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
     SAFE,
     assert_isolation_and_cleanup,
     export_task,
+    live_agent,
     synthetic_package,
 )
 
@@ -116,7 +116,7 @@ def test_live_config_exposes_native_agent_and_model_labels(tmp_path, model):
     from harbor.models.trial.config import AgentConfig
 
     settings = load_draft(model=model)
-    config = AgentConfig.model_validate(agent_config("live", settings=settings))
+    config = AgentConfig.model_validate(live_agent(settings))
     assert config.name == "ariadne"
     assert config.model_name == settings["models"]["agent"]
     assert AgentFactory.get_agent_class_from_config(config) is LiveAgent

@@ -99,10 +99,3 @@ def test_rev_02_record_keeps_the_upstream_binary_and_solver():
     assert b"flag{" not in binary
     solver = (package.root / "private/solve/palatinepacksolve.py").read_bytes()
     assert b"SOLVER_EOF" not in solver
-
-
-def test_harness_has_no_generated_executable_mode():
-    runner = (ROOT / "benchmark/runner.py").read_text()
-    assert "executable_files" not in runner
-    assert "package_modes" not in runner
-    assert not (ROOT / "benchmark/package_modes.py").exists()

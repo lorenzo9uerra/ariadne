@@ -1,4 +1,4 @@
-"""Flag package and runner checks with synthetic records."""
+"""Flag package checks with synthetic records."""
 
 import asyncio
 import hashlib

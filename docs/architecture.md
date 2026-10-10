@@ -24,8 +24,8 @@ it; the [benchmark protocol](benchmark_protocol.md) defines the rules it enforce
 
 ```text
 pyproject.toml, uv.lock      pinned dependencies, one environment for all
-job.yaml                     native Harbor job: three controlled-agent attempts
-job.dev.yaml                 one unpaid trial with Harbor's nop agent
+job.yaml                     experiment template: three controlled-agent attempts
+job.dev.yaml                 one manual trial; Harbor's unpaid nop agent by default
 benchmark/                   admission, agent, policies, grading and experiments
 sandbox/                     shared image, analysis tools and isolation checks
   container/                 scripts the harness runs inside containers
@@ -127,8 +127,7 @@ training exports must apply those decisions when selecting trajectories.
 | `benchmark/costs.py`, `audit.py` | Spending ledger and private audit records on the host |
 | `benchmark/verifier.py`, `answers.py` | Parse and score JSON or flag submissions inside the verifier |
 | `benchmark/oracle.py` | Stage a task's preserved reference solver for Harbor's Oracle agent |
-| `benchmark/runner.py` | Command line: experiments, and development checks (an Oracle run, one live trial) |
-| `benchmark/experiment.py` | Plan, run, resume and replace an experiment's Harbor jobs; command line for reports and reviews |
+| `benchmark/experiment.py` | Plan, run, resume and replace an experiment's Harbor jobs; the command line for experiments, reviews, reports and job checks |
 | `benchmark/records.py` | An experiment on disk: frozen plan, append-only event journal, input fingerprints |
 | `benchmark/report.py` | Scores per attempt, run and experiment, written to `summary.json` |
 | `benchmark/review.py` | Record a review decision; run automatic review |
@@ -149,8 +148,9 @@ training exports must apply those decisions when selecting trajectories.
 
 ## A trial, step by step
 
-`benchmark/runner.py` creates the experiment or development job. Harbor's
-`Job` runs each `Trial`, calling Ariadne's environment and agent interfaces:
+`benchmark/experiment.py` creates an experiment's jobs, and `harbor run`
+starts development jobs. Harbor's `Job` runs each `Trial`, calling Ariadne's
+environment and agent interfaces:
 
 ```text
 Evaluation host                           Docker host
@@ -280,14 +280,14 @@ Token usage comes from the provider. There is no cumulative token cap: turns,
 tool calls and time end an attempt, and each request must fit the model's
 context window, without silently dropping history.
 
-The runner resolves `--model` through a declared profile in
+`benchmark.experiment run` resolves `--model` through a declared profile in
 `benchmark/draft.toml` and freezes the selected route, prices and generation
 settings into the experiment. Non-OpenAI profiles use an explicit tokenizer
 estimate to check context capacity; provider context validation and reported
 usage remain authoritative. Cost reservations use the whole verified context
 window rather than this estimate.
 
-The runner applies `--limits PATH` after selecting the model profile, so a
+It applies `--limits PATH` after selecting the model profile, so a
 small TOML file can override execution and spending limits. The final values
 enter the frozen plan and every live agent's configuration. Harbor's outer
 timeout follows the attempt deadline, with five seconds for saving the final
@@ -312,7 +312,7 @@ agent; it is not an access-control mechanism for people using the host.
 
 ## Experiments, reviews and scores
 
-A live run without `--dev` creates one Harbor job per task, with three fresh
+`benchmark.experiment run` creates one Harbor job per task, with three fresh
 trials each. `benchmark/experiment.py` freezes the settings and input hashes
 before execution, and refuses to continue if
 those inputs change. New trajectories record the installed framework release;

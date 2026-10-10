@@ -14,7 +14,7 @@ from tests.support import GOOD, chat_reply, completion, endpoint_data
 
 PLATFORM = os.environ.get("SANDBOX_PLATFORM", "linux/arm64")
 
-# Docker tests start sandboxes directly, without the runner, so they need the
+# Docker tests start sandboxes directly, without a Harbor job, so they need the
 # same content-hash image tag (sandbox/compose.yaml requires it).
 os.environ.setdefault("SANDBOX_IMAGE_TAG", image_tag(PLATFORM))
 

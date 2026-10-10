@@ -20,7 +20,6 @@ from harbor.models.trial.result import TrialResult
 from benchmark.agent import LiveAgent, decode_capture, parse_calls
 from benchmark.answers import reward_values
 from benchmark.budgets import load_draft
-from benchmark.runner import agent_config, run_job
 from benchmark.tasks import ROOT
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import AriadneDockerEnvironment
@@ -31,7 +30,9 @@ from tests.support import (
     assert_isolation_and_cleanup,
     completion,
     export_review_task,
+    live_agent,
     review_package,
+    run_job,
 )
 
 
@@ -403,7 +404,7 @@ def test_mocked_reviewed_web_through_native_job(tmp_path, live_mock, reviewed_we
         ]
     )
     result, folder = asyncio.run(
-        run_job(task, tmp_path / "jobs", agent_config("live"), dev=True)
+        run_job(task, tmp_path / "jobs", live_agent(), dev=True)
     )
     assert result.stats.n_errored_trials == 0
     path = next(folder.glob("*/result.json"))
@@ -729,9 +730,7 @@ def test_mocked_live_agent_through_native_job(tmp_path, live_mock, case):
         )
         replies.append(completion([api_call("submit", {"answer": WRONG})]))
     result, folder = asyncio.run(
-        run_job(
-            task, tmp_path / "jobs", agent_config("live", settings=config), dev=True
-        )
+        run_job(task, tmp_path / "jobs", live_agent(config), dev=True)
     )
     assert result.stats.n_errored_trials == 0
     native = JobConfig.model_validate_json((folder / "config.json").read_text())
@@ -800,7 +799,7 @@ def test_mocked_agent_output_bounds_and_timeout_cleanup(tmp_path, live_mock):
         platform,
     )
     result, folder = asyncio.run(
-        run_job(task, tmp_path / "jobs", agent_config("live"), dev=True)
+        run_job(task, tmp_path / "jobs", live_agent(), dev=True)
     )
     assert result.stats.n_errored_trials == 0
     path = next(folder.glob("*/result.json"))
@@ -850,7 +849,7 @@ def test_live_reviewed_web_with_synthetic_task(tmp_path):
             **yaml.safe_load((ROOT / "job.dev.yaml").read_text()),
             "jobs_dir": str(ROOT / "jobs"),
             "tasks": [{"path": str(task)}],
-            "agents": [agent_config("live", settings=settings)],
+            "agents": [live_agent(settings)],
         }
     )
 

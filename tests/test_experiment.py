@@ -19,7 +19,7 @@ from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
 from harbor.models.verifier.result import VerifierResult
 from harbor.viewer.scanner import JobScanner
 
-from benchmark import experiment, records, report, runner
+from benchmark import experiment, records, report
 from benchmark.answers import METRICS, reward_values
 from benchmark.budgets import load_draft
 from benchmark.experiment import check_result
@@ -545,29 +545,28 @@ def test_pending_web_context_blocks_the_experiment_before_api(
     assert not harness[3]
 
 
-@pytest.mark.parametrize("dev", [False, True])
-def test_cli_defaults_to_experiment_and_explicit_fast_check(
-    harness, tmp_path, monkeypatch, dev
+@pytest.mark.parametrize("removed", [True, False])
+def test_check_confirms_evidence_and_removed_containers(
+    harness, tmp_path, monkeypatch, capsys, removed
 ):
-    called = []
-
-    async def experiment_run(packages, jobs_dir, **kwargs):
-        called.append("experiment")
-        return tmp_path
-
-    monkeypatch.setattr(runner, "load_package", lambda path: harness[0])
-    monkeypatch.setattr(runner, "ensure_image", lambda *args: None)
-    monkeypatch.setattr(runner, "select_platform", lambda *args: "linux/amd64")
-    monkeypatch.setattr(runner, "run_experiment", experiment_run)
-    monkeypatch.setattr(
-        runner, "run_check", lambda package, args: called.append("check")
-    )
-    argv = ["runner", "--challenge", "synthetic", "--live"]
-    if dev:
-        argv.append("--dev")
+    folder = run(harness, tmp_path)
+    job = Path(experiment.report(folder)["attempts"][0]["path"]).parents[1]
+    for record in job.glob("*/security-*.json"):
+        data = json.loads(record.read_text()) | {"container_id": "synthetic"}
+        record.write_text(json.dumps(data))
+    inspected = SimpleNamespace(returncode=1 if removed else 0)
+    monkeypatch.setattr(experiment.subprocess, "run", lambda *a, **k: inspected)
+    # Without an argument, check reads the newest job under ROOT/jobs.
+    monkeypatch.setattr(experiment, "ROOT", tmp_path)
+    argv = ["experiment", "check"] + ([] if removed else [str(job)])
     monkeypatch.setattr(sys, "argv", argv)
-    runner.main()
-    assert called == ["check" if dev else "experiment"]
+    if removed:
+        experiment.main()
+        assert capsys.readouterr().out.count("evidence confirmed") == 3
+    else:
+        with pytest.raises(SystemExit):
+            experiment.main()
+        assert "was not removed" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(
@@ -798,38 +797,36 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
         '[budgets]\nelapsed_seconds = 1800\n[spending]\nattempt_limit_usd = "5"\n'
     )
 
+    original = experiment.run_experiment
+
     async def experiment_run(packages, jobs_dir, **kwargs):
         seen.append(kwargs["settings"])
-        return tmp_path
+        return await original(packages, jobs_dir, seed=7, **kwargs)
 
-    monkeypatch.setattr(runner, "load_package", lambda path: harness[0])
-    monkeypatch.setattr(runner, "ensure_image", lambda *args: None)
-    monkeypatch.setattr(runner, "select_platform", lambda *args: "linux/amd64")
-    monkeypatch.setattr(runner, "run_experiment", experiment_run)
+    monkeypatch.setattr(experiment, "load_package", lambda path: harness[0])
+    monkeypatch.setattr(experiment, "run_experiment", experiment_run)
     monkeypatch.setattr(
         sys,
         "argv",
         [
-            "runner",
-            "--challenge",
+            "experiment",
+            "run",
+            "--task",
             "synthetic",
-            "--live",
             "--model",
             model,
             "--limits",
             str(limits),
+            "--jobs-dir",
+            str(tmp_path / "jobs"),
         ],
     )
-    runner.main()
+    experiment.main()
     assert seen[0]["models"]["agent"] == "openrouter/" + model
     assert seen[0]["runs"]["independent_attempts"] == 3
     assert seen[0]["budgets"]["elapsed_seconds"] == 1800
     assert seen[0]["spending"]["attempt_limit_usd"] == "5"
-    folder = asyncio.run(
-        experiment.run_experiment(
-            [harness[0]], tmp_path / "jobs", settings=seen[0], seed=7
-        )
-    )
+    folder = next((tmp_path / "logs/experiments").iterdir())
     plan = experiment.read_plan(folder)
     assert plan["settings"] == seen[0]
     assert all(config.agents[0].override_timeout_sec == 1805 for config in harness[3])

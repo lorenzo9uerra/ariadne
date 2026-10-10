@@ -1,6 +1,7 @@
 """Plan, run, resume and replace an experiment's native Harbor jobs.
 
-Also the command line for reports and reviews (python -m benchmark.experiment).
+Also the command line (python -m benchmark.experiment) for what Harbor lacks:
+experiments, reviews, reports and checking a finished job's evidence.
 """
 
 import argparse
@@ -9,6 +10,7 @@ import fcntl
 import json
 import logging
 import secrets
+import subprocess
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -22,10 +24,9 @@ from harbor.models.trial.result import TrialResult
 from harbor.utils.logger import logger as harbor_logger
 from rich import get_console
 
-from benchmark.answers import (
-    reward_weights,
-)
+from benchmark.answers import is_success, reward_weights
 from benchmark.budgets import load_draft
+from benchmark.oracle import redact
 from benchmark.records import (
     DISPOSITIONS,
     EXCLUDED,
@@ -40,7 +41,7 @@ from benchmark.records import (
 )
 from benchmark.report import report
 from benchmark.review import autoreview_experiment, review
-from benchmark.tasks import ROOT, Package, reviewer_context
+from benchmark.tasks import ROOT, Package, load_package, reviewer_context
 
 
 class ProgressStream:
@@ -332,6 +333,75 @@ def pending(folder, task=None):
             yield item, slot, row
 
 
+def isolation_evidence(trial: Path) -> list[dict]:
+    """The trial's two isolation records, once every check passed and cleanup ran."""
+    evidence = [json.loads(p.read_text()) for p in trial.glob("security-*.json")]
+    if len(evidence) != 2 or not all(
+        e.get("checks") and all(e["checks"].values()) and e.get("cleanup_requested")
+        for e in evidence
+    ):
+        raise RuntimeError(
+            f"Isolation or cleanup evidence failed; inspect {trial.name}"
+        )
+    return evidence
+
+
+def check_trial(trial: Path) -> str:
+    """Confirm a finished trial's evidence; an Oracle trial must also pass in full."""
+    result = TrialResult.model_validate_json((trial / "result.json").read_text())
+    if result.exception_info:
+        error = result.exception_info
+        raise RuntimeError(
+            redact(f"{trial.name}: {error.exception_type}: {error.exception_message}")
+        )
+    evidence = isolation_evidence(trial)
+    for record in evidence:
+        if not record.get("container_id"):
+            raise RuntimeError(f"{trial.name}: container cleanup was not recorded")
+        identifiers = [("container", record["container_id"])]
+        if "target_container_id" in record:
+            identifiers += [
+                ("container", record["target_container_id"]),
+                ("network", record["network_id"]),
+            ]
+        for kind, identifier in identifiers:
+            inspected = subprocess.run(
+                ["docker", kind, "inspect", identifier], capture_output=True, timeout=15
+            )
+            if inspected.returncode == 0:
+                raise RuntimeError(f"{trial.name}: a {kind} was not removed")
+    rewards = result.verifier_result.rewards if result.verifier_result else None
+    if result.agent_info.name != "oracle":
+        return f"{trial.name}: evidence confirmed; scores {json.dumps(rewards)}"
+    staged = next((r for r in evidence if "oracle_staged_files" in r), {})
+    if not staged.get("oracle_entrypoint_ran") or not staged.get(
+        "oracle_stage_removed"
+    ):
+        raise RuntimeError(f"{trial.name}: the Oracle staging did not run and clean up")
+    task = result.config.task.path
+    if task is None:
+        raise RuntimeError(f"{trial.name}: Oracle checks need a local task")
+    service = load_package(task).manifest["service"]
+    if service and "target_container_id" not in staged:
+        raise RuntimeError(f"{trial.name}: the service target was not recorded")
+    if not rewards or not is_success(rewards):
+        raise RuntimeError(f"{trial.name}: the Oracle reference did not pass")
+    return f"{trial.name}: Oracle reference passed in full; evidence confirmed"
+
+
+def check_job(job: Path | None = None) -> list[str]:
+    """Check every finished trial of a job; by default the newest job in jobs/."""
+    if job is None:
+        jobs = [path for path in (ROOT / "jobs").glob("*") if path.is_dir()]
+        if not jobs:
+            raise RuntimeError("No jobs to check")
+        job = max(jobs, key=lambda path: path.stat().st_mtime)
+    trials = sorted(path.parent for path in job.glob("*/result.json"))
+    if not trials:
+        raise RuntimeError(f"No finished trials in {job}")
+    return [f"Job: {job}", *(check_trial(trial) for trial in trials)]
+
+
 def check_result(row):
     if row is None or row["exception_type"] or row["stop_reason"] not in ORDINARY:
         raise RuntimeError("Trial interrupted; attribute the failure before resuming")
@@ -339,15 +409,7 @@ def check_result(row):
         raise RuntimeError(
             "Trial ended during API retry backoff; review the external failure before replacing it"
         )
-    trial = Path(row["path"]).parent
-    evidence = [json.loads(p.read_text()) for p in trial.glob("security-*.json")]
-    if len(evidence) != 2 or not all(
-        e.get("checks") and all(e["checks"].values()) and e.get("cleanup_requested")
-        for e in evidence
-    ):
-        raise RuntimeError(
-            "Isolation or cleanup evidence failed; inspect the retained trial"
-        )
+    isolation_evidence(Path(row["path"]).parent)
     if row["cost_usd"] is None or row["held_usd"] != 0:
         print(
             f"Billing pending for attempt {row['attempt']}; reservations retained. "
@@ -540,6 +602,33 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    start = commands.add_parser("run", help="Start a paid experiment")
+    start.add_argument(
+        "--task", required=True, nargs="+", help="Task directory names in tasks/"
+    )
+    start.add_argument(
+        "--model",
+        choices=tuple(load_draft().get("agents", {})),
+        help="Reviewed OpenRouter agent profile (default: configured baseline)",
+    )
+    start.add_argument(
+        "--limits", type=Path, help="TOML overrides for execution and spending limits"
+    )
+    start.add_argument(
+        "--jobs-dir",
+        type=Path,
+        default=ROOT / "jobs",
+        help="Where native Harbor jobs are written (default: jobs/)",
+    )
+    check = commands.add_parser(
+        "check", help="Check a finished Harbor job's isolation and cleanup evidence"
+    )
+    check.add_argument(
+        "job",
+        type=Path,
+        nargs="?",
+        help="A job directory (default: the newest in jobs/)",
+    )
     show = commands.add_parser("report", help="Rewrite summary.json")
     show.add_argument("experiment", type=Path)
     label = commands.add_parser("review", help="Record a review decision")
@@ -564,8 +653,18 @@ def main() -> None:
     rerun.add_argument("--job", required=True)
     rerun.add_argument("--slot", type=int, required=True)
     args = parser.parse_args()
-    folder = args.experiment.resolve()
     try:
+        if args.command == "check":
+            print("\n".join(check_job(args.job)))
+            return
+        if args.command == "run":
+            settings = load_draft(model=args.model, limits=args.limits)
+            packages = [load_package(ROOT / "tasks" / name) for name in args.task]
+            folder = asyncio.run(
+                run_experiment(packages, args.jobs_dir, settings=settings)
+            )
+        else:
+            folder = args.experiment.resolve()
         if args.command == "review":
             review(
                 folder,
@@ -582,7 +681,7 @@ def main() -> None:
             asyncio.run(autoreview_experiment(folder, retry_failed=args.retry_failed))
         elif args.command == "replace":
             asyncio.run(replace_attempt(folder, args.job, args.slot))
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, RuntimeError) as error:
         parser.exit(1, f"{error}\n")
     summary = report(folder)
     print(

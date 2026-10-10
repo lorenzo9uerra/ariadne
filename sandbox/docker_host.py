@@ -38,7 +38,7 @@ def docker_architecture() -> str:
         ).strip()
         raise SystemExit(
             f"Docker host check failed:\n{detail}\n"
-            "Use 'docker context ls' to check the name passed to --docker-context."
+            "Use 'docker context ls' to check the name in DOCKER_CONTEXT."
         ) from None
     if reported not in ARCHITECTURES:
         raise RuntimeError(f"Unsupported Docker host architecture: {reported}")
@@ -55,7 +55,7 @@ def select_platform(required: str) -> str:
         raise SystemExit(
             f"This package needs a linux/{required} Docker host, but the active "
             f"Docker context runs linux/{host}. Select a matching context with "
-            "--docker-context (see docs/vm_setup.md)."
+            "DOCKER_CONTEXT (see docs/vm_setup.md)."
         )
     platform = f"linux/{host}"
     preset = os.environ.get("SANDBOX_PLATFORM")

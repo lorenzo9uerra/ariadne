@@ -176,6 +176,6 @@
     ansible.builtin.debug:
       msg:
       - "{{ sandbox_tests.stdout }}"
-      - "Run Ariadne locally with --docker-context {{ docker_context }}."
+      - "Run Ariadne locally with DOCKER_CONTEXT={{ docker_context }}."
     when: not ansible_check_mode
     tags: verify
