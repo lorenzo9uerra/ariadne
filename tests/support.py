@@ -81,14 +81,13 @@ class FakeBackend:
         return self.pages[url]
 
 
-def session(monitor=None, enabled=True):
+def session(monitor=None):
     return Session(
         load_draft(),
         monitor or FakeMonitor(),
         {"challenge_id": "synthetic-01", "answer_type": "flag"},
         "test-run",
         "sample-1",
-        enabled,
     )
 
 

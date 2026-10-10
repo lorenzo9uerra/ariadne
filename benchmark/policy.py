@@ -74,7 +74,6 @@ class Session:
         reviewer_context: dict,
         run_id: str,
         sample_id: str,
-        web_enabled: bool,
         *,
         audit_path: Path | None = None,
         secrets: tuple[str, ...] = (),
@@ -86,7 +85,6 @@ class Session:
         self.context_hash = hashlib.sha256(
             json.dumps(reviewer_context, sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()
-        self.web_enabled = web_enabled
         self.audit = AuditTrail(run_id, sample_id, audit_path)
         self.counters = Counters(config["budgets"])
         self.calls: dict = {}
@@ -106,7 +104,7 @@ class Session:
     def record_proposals(self, calls) -> None:
         # Count the entire proposed batch before parsing arguments or executing tools.
         for call in calls:
-            self.counters.reserve(call["id"], call["function"], self.web_enabled)
+            self.counters.reserve(call["id"], call["function"])
             self.calls[call["id"]] = call
             self.audit.record(
                 "proposal",

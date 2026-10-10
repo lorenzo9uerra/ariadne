@@ -26,7 +26,7 @@ def pytest_sessionstart(session):
 
 
 @pytest.fixture
-def live_mock(tmp_path, monkeypatch):
+def live_mock(tmp_path, monkeypatch, request):
     root = tmp_path / "harness"
     root.mkdir()
     (root / "config.toml").write_text('spend_ledger = "spending.sqlite3"\n')
@@ -56,11 +56,17 @@ def live_mock(tmp_path, monkeypatch):
     monkeypatch.setattr("benchmark.agent.OpenRouterModel", factory)
     # The native Job constructs its own agent; keep its tests on this config too.
     monkeypatch.setattr("benchmark.agent.load_draft", lambda: copy.deepcopy(config))
+    # Every live agent has reviewed web access; reviewed_web exposes these mocks.
+    request.node.reviewed_web = mock_web(monkeypatch)
     return config, replies, seen
 
 
 @pytest.fixture
-def reviewed_web(live_mock, monkeypatch):
+def reviewed_web(live_mock, request):
+    return request.node.reviewed_web
+
+
+def mock_web(monkeypatch):
     from benchmark import reviewers
     from benchmark.web import HTTPReply, SearchHit
 

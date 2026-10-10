@@ -178,7 +178,7 @@ def live_fetch(
     monitor = reviewers.live_monitor(
         config, ledger, "test-key", "run-1", httpx.MockTransport(recorded)
     )
-    session = Session(config, monitor, context, "run-1", "sample-1", True)
+    session = Session(config, monitor, context, "run-1", "sample-1")
     backend = Backend(text)
     proposal = call("c1", "web_fetch", {"url": CANDIDATE["url"]})
 

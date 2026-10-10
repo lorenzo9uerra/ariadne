@@ -1,4 +1,4 @@
-"""Run paired Harbor experiments or explicit development checks."""
+"""Run Harbor experiments or explicit development checks."""
 
 import argparse
 import asyncio
@@ -21,9 +21,7 @@ from benchmark.tasks import ROOT, load_package
 from sandbox.docker_host import ensure_image, select_platform
 
 
-def agent_config(
-    kind: str, condition: str = "offline", *, settings: dict | None = None
-) -> dict:
+def agent_config(kind: str, *, settings: dict | None = None) -> dict:
     """The Harbor agent for each mode: Harbor's Oracle, or Ariadne's live agent."""
     if kind == "oracle":
         return {"name": "oracle"}
@@ -31,10 +29,7 @@ def agent_config(
         "name": "ariadne",
         "import_path": "benchmark.agent:LiveAgent",
         "model_name": (settings or load_draft())["models"]["agent"],
-        "kwargs": {
-            "condition": condition,
-            **({"config": settings} if settings else {}),
-        },
+        "kwargs": {"config": settings} if settings else {},
     }
 
 
@@ -105,7 +100,7 @@ def main() -> None:
     mode.add_argument(
         "--live",
         action="store_true",
-        help="Paid run of the controlled model agent; a paired experiment unless --dev",
+        help="Paid run of the controlled model agent; an experiment unless --dev",
     )
     parser.add_argument(
         "--model",
@@ -114,11 +109,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--limits", type=Path, help="TOML overrides for execution and spending limits"
-    )
-    parser.add_argument(
-        "--condition",
-        choices=("offline", "web", "both"),
-        help="With --live: default both for experiments, offline for --dev",
     )
     parser.add_argument(
         "--dev",
@@ -144,10 +134,6 @@ def main() -> None:
         args.settings = load_draft(model=args.model, limits=args.limits)
     except (OSError, ValueError) as error:
         parser.error(str(error))
-    if args.condition is not None and not args.live:
-        parser.error("Reviewed web access requires --live")
-    if args.dev and args.condition == "both":
-        parser.error("Select one condition for --dev")
     if args.docker_context:
         if os.environ.get("DOCKER_HOST"):
             raise SystemExit("Unset DOCKER_HOST to select a Docker context")
@@ -158,12 +144,8 @@ def main() -> None:
     for package in packages:
         ensure_image(select_platform(package.manifest["architecture"]))
     if args.live and not args.dev:
-        condition = args.condition or "both"
-        conditions = ("offline", "web") if condition == "both" else (condition,)
         folder = asyncio.run(
-            run_experiment(
-                packages, args.jobs_dir, conditions=conditions, settings=args.settings
-            )
+            run_experiment(packages, args.jobs_dir, settings=args.settings)
         )
         print(f"Harbor experiment: {folder}")
         print(f"View rollouts: uv run harbor view {args.jobs_dir}")
@@ -176,13 +158,12 @@ def main() -> None:
 
 
 def run_check(package, args) -> None:
-    condition = args.condition or "offline"
     kind = "oracle" if args.oracle else "live"
     result, path = asyncio.run(
         run_job(
             package.root,
             args.jobs_dir,
-            agent_config(kind, condition, settings=args.settings),
+            agent_config(kind, settings=args.settings),
             dev=args.dev or args.live,
         )
     )
@@ -206,7 +187,7 @@ def run_check(package, args) -> None:
         trial = TrialResult.model_validate_json(record.read_text())
         if args.live:
             rewards = trial.verifier_result.rewards if trial.verifier_result else None
-            print(f"{condition.capitalize()} development scores: {json.dumps(rewards)}")
+            print(f"Development scores: {json.dumps(rewards)}")
             continue
         if not trial.verifier_result or not is_success(trial.verifier_result.rewards):
             raise SystemExit("Oracle reference did not receive full scores")

@@ -123,7 +123,7 @@ def journal(folder: Path):
 def read_plan(folder: Path) -> dict:
     path = folder / "private/plan.json"
     plan = json.loads(path.read_text())
-    if plan.get("version") != 3:
+    if plan.get("version") != 4:
         raise ValueError("Unsupported experiment plan version")
     with journal(folder) as (events, _):
         updates = [

@@ -1,7 +1,7 @@
 # Task
 
 Complete the supplied task using its files and any local services it names.
-The task description follows this message. $condition
+The task description follows this message. Web tools are available for this task: web_search and web_fetch.
 
 # How to work
 

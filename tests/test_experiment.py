@@ -181,15 +181,11 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
     folder = run(harness, tmp_path)
     package, settings, _, configs = harness
     plan = experiment.read_plan(folder)
-    assert len(configs) == 2 and all(config.n_attempts == 3 for config in configs)
+    assert len(configs) == 1 and configs[0].n_attempts == 3
     assert all(
         config.n_concurrent_trials == 1 and config.retry.max_retries == 0
         for config in configs
     )
-    assert {config.agents[0].kwargs["condition"] for config in configs} == {
-        "offline",
-        "web",
-    }
     assert all(config.agents[0].kwargs["config"] == settings for config in configs)
     assert all(config.agents[0].name == "ariadne" for config in configs)
     assert folder.parent == tmp_path / "logs/experiments"
@@ -204,7 +200,6 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
     other = experiment.create_plan(
         [package],
         tmp_path / "other",
-        ("offline", "web"),
         settings=settings,
         jobs_dir=tmp_path / "jobs",
         seed=7,
@@ -213,15 +208,12 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
     settings["budgets"]["agent_turns"] = 1
     assert plan["settings"]["budgets"]["agent_turns"] != 1
     report = experiment.report(folder)
-    assert len({row["attempt"] for row in report["attempts"]}) == 6
-    assert not report["complete"] and not report["condition_scores"]
-    assert report["clean_web_minus_offline"] is None
+    assert len({row["attempt"] for row in report["attempts"]}) == 3
+    assert not report["complete"] and not report["scores"]
     for row in report["attempts"]:
         count(folder, row["attempt"])
     report = experiment.report(folder)
-    assert report["complete"] and report["counted_cost_usd"] == 6
-    assert report["clean_web_minus_offline"] == 0
-    assert report["paired_differences"] == {package.id: 0}
+    assert report["complete"] and report["counted_cost_usd"] == 3
 
 
 @pytest.mark.parametrize("failed_slot", [1, 3])
@@ -231,7 +223,7 @@ def test_native_batch_checks_each_result_before_starting_another(
     package, settings, outcomes, configs = harness
     folder = tmp_path / "batch"
     plan = experiment.create_plan(
-        [package], folder, ("offline",), settings=settings, jobs_dir=tmp_path / "jobs"
+        [package], folder, settings=settings, jobs_dir=tmp_path / "jobs"
     )
     outcomes.extend([dict.fromkeys(METRICS, 0)] * 3)
     checked = []
@@ -260,7 +252,7 @@ def test_shared_execution_stops_on_infrastructure_errors_but_keeps_valid_failure
 ):
     monkeypatch.setattr(experiment, "check_result", check_result)
     package, settings, outcomes, configs = harness
-    outcomes.extend([None] if interrupted else [dict.fromkeys(METRICS, 0)] * 6)
+    outcomes.extend([None] if interrupted else [dict.fromkeys(METRICS, 0)] * 3)
     execution = experiment.run_experiment(
         [package], tmp_path / "jobs", settings=settings
     )
@@ -269,9 +261,9 @@ def test_shared_execution_stops_on_infrastructure_errors_but_keeps_valid_failure
             asyncio.run(execution)
     else:
         asyncio.run(execution)
-    assert len(configs) == (1 if interrupted else 2)
+    assert len(configs) == 1
     folder = next((tmp_path / "logs/experiments").iterdir())
-    assert len(experiment.report(folder)["attempts"]) == (1 if interrupted else 6)
+    assert len(experiment.report(folder)["attempts"]) == (1 if interrupted else 3)
 
 
 def test_experiments_share_native_job_directory_without_overwriting(harness, tmp_path):
@@ -282,15 +274,15 @@ def test_experiments_share_native_job_directory_without_overwriting(harness, tmp
     }
     second = run(harness, tmp_path)
     assert first != second
-    assert len(JobScanner(tmp_path / "jobs").list_jobs()) == 4
+    assert len(JobScanner(tmp_path / "jobs").list_jobs()) == 2
     assert all(path.read_bytes() == data for path, data in first_results.items())
-    assert len(experiment.report(first)["attempts"]) == 6
-    assert len(experiment.report(second)["attempts"]) == 6
+    assert len(experiment.report(first)["attempts"]) == 3
+    assert len(experiment.report(second)["attempts"]) == 3
 
 
 def test_json_components_contamination_and_scope_are_per_attempt(harness, tmp_path):
     harness[2].extend([dict.fromkeys(METRICS, 1), dict(zip(METRICS, (1, 0, 1))), None])
-    folder = run(harness, tmp_path, conditions=("web",))
+    folder = run(harness, tmp_path)
     rows = experiment.report(folder)["attempts"]
     count(
         folder,
@@ -322,17 +314,15 @@ def test_equal_task_weights_and_category_means(harness, tmp_path):
         experiment.run_experiment(
             [package, flag],
             tmp_path / "jobs",
-            conditions=("offline",),
             settings=settings,
         )
     )
     for row in experiment.report(folder)["attempts"]:
         count(folder, row["attempt"])
     report = experiment.report(folder)
-    assert report["condition_scores"]["offline"]["clean_pass_at_1"] == 0.5
-    assert report["category_scores"]["rev"]["offline"]["clean_pass_at_1"] == 0
-    assert report["category_scores"]["juliet"]["offline"]["clean_pass_at_1"] == 1
-    assert report["clean_web_minus_offline"] is None
+    assert report["scores"]["clean_pass_at_1"] == 0.5
+    assert report["category_scores"]["rev"]["clean_pass_at_1"] == 0
+    assert report["category_scores"]["juliet"]["clean_pass_at_1"] == 1
 
 
 def test_weighted_rewards_do_not_change_benchmark_success(harness, tmp_path):
@@ -346,14 +336,14 @@ def test_weighted_rewards_do_not_change_benchmark_success(harness, tmp_path):
             reward_values(dict.fromkeys(METRICS, 0), weights, {"parsed_record": 0.5}),
         ]
     )
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
     plan = experiment.read_plan(folder)
     assert plan["jobs"][0]["reward_weights"] == weights
     for row in experiment.report(folder)["attempts"]:
         count(folder, row["attempt"])
     report = experiment.report(folder)
     assert [row["raw_solve"] for row in report["attempts"]] == [1, 0, 0]
-    assert report["condition_scores"]["offline"]["clean_pass_at_1"] == 1 / 3
+    assert report["scores"]["clean_pass_at_1"] == 1 / 3
     components = report["runs"][0]["components"]
     assert components["parsed_record"] == 0.5
     assert components["reward"] == pytest.approx((2 + 0.25 + 0.125) / 3)
@@ -362,13 +352,13 @@ def test_weighted_rewards_do_not_change_benchmark_success(harness, tmp_path):
 def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cost(
     harness, tmp_path
 ):
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
     rows = experiment.report(folder)["attempts"]
     original = rows[0]
     path = folder / original["path"]
     original_bytes = path.read_bytes()
     with pytest.raises(ValueError, match="reviewed"):
-        asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+        asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
     experiment.review(
         folder,
         original["attempt"],
@@ -377,7 +367,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
         evidence=["confirmed harness defect"],
     )
     with pytest.raises(ValueError, match="fix version"):
-        asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+        asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
     for row in rows[1:]:
         count(folder, row["attempt"])
     implementation = experiment.ROOT / "benchmark/agent.py"
@@ -390,7 +380,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
         evidence=["confirmed fix"],
         fix_version="synthetic-v2",
     )
-    asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+    asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
     pending = experiment.report(folder)
     replacement = pending["attempts"][-1]
     assert replacement["replaces"] == original["attempt"]
@@ -406,7 +396,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
     with pytest.raises(ValueError, match="attribution"):
         count(folder, original["attempt"])
     with pytest.raises(ValueError, match="reviewed"):
-        asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+        asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
 
 
 @pytest.mark.parametrize(
@@ -414,7 +404,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
     ["task", "prompt", "review_prompt", "config", "implementation", "shell"],
 )
 def test_drift_blocks_generation_even_for_replacements(harness, tmp_path, change):
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
     row = experiment.report(folder)["attempts"][0]
     experiment.review(
         folder,
@@ -434,14 +424,14 @@ def test_drift_blocks_generation_even_for_replacements(harness, tmp_path, change
     }
     paths[change].write_text("Changed input.\n")
     with pytest.raises(ValueError, match="changed"):
-        asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+        asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
     assert len(harness[3]) == 1
 
 
 def test_unattributed_replacement_requires_manual_note_and_keeps_original(
     harness, tmp_path
 ):
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
     original = experiment.report(folder)["attempts"][0]
     path = folder / original["path"]
     saved = path.read_bytes()
@@ -463,7 +453,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
         evidence=["Synthetic interruption"],
         note="Owner approved exclusion with cause unresolved.",
     )
-    asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+    asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
     summary = experiment.report(folder)
     assert path.read_bytes() == saved
     assert summary["excluded_attempts"] == [original["attempt"]]
@@ -471,7 +461,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
 
 
 def test_replacement_lock_and_reviewed_fix_hash(harness, tmp_path):
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
     row = experiment.report(folder)["attempts"][0]
     experiment.review(
         folder,
@@ -484,14 +474,14 @@ def test_replacement_lock_and_reviewed_fix_hash(harness, tmp_path):
     with (folder / "private/replacement.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(ValueError, match="Another replacement"):
-            asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+            asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
     (experiment.ROOT / "benchmark/agent.py").write_text("# Unreviewed fix\n")
     with pytest.raises(ValueError, match="since the fix"):
-        asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+        asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
 
 
 def test_result_tampering_rejected(harness, tmp_path):
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
     row = experiment.report(folder)["attempts"][0]
     path = folder / row["path"]
     path.write_text(path.read_text() + "\n")
@@ -503,7 +493,7 @@ def test_result_tampering_rejected(harness, tmp_path):
 
 def test_unknown_billing_not_reported_as_zero(harness, tmp_path):
     harness[2].extend([(dict.fromkeys(METRICS, 1), {})] * 3)
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
     for row in experiment.report(folder)["attempts"]:
         count(folder, row["attempt"])
     report = experiment.report(folder)
@@ -518,7 +508,7 @@ def test_interrupted_attempt_keeps_evidence_and_missing_slots_pending(
 ):
     harness[2].append(RuntimeError("Synthetic interrupted job"))
     with pytest.raises(RuntimeError, match="interrupted"):
-        run(harness, tmp_path, conditions=("offline",))
+        run(harness, tmp_path)
     folder = next((tmp_path / "logs/experiments").iterdir())
     pending = experiment.report(folder)
     assert not pending["complete"] and pending["runs"][0]["attempts"][1:] == [
@@ -536,14 +526,14 @@ def test_interrupted_attempt_keeps_evidence_and_missing_slots_pending(
         reviewer="human",
         evidence=["interruption and cleanup reviewed"],
     )
-    asyncio.run(experiment.replace_attempt(folder, "synthetic-json-offline", 1))
+    asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
     report = experiment.report(folder)
     assert report["attempts"][-1]["replaces"] == original["attempt"]
     assert report["unknown_retained_costs"] == 1
     assert not report["complete"]
 
 
-def test_pending_web_context_blocks_both_conditions_before_api(
+def test_pending_web_context_blocks_the_experiment_before_api(
     harness, tmp_path, monkeypatch
 ):
     def pending(package):
@@ -555,45 +545,36 @@ def test_pending_web_context_blocks_both_conditions_before_api(
     assert not harness[3]
 
 
-@pytest.mark.parametrize(
-    "dev,condition", [(False, None), (False, "offline"), (True, None), (True, "web")]
-)
-def test_cli_defaults_to_paired_experiment_and_explicit_fast_check(
-    harness, tmp_path, monkeypatch, dev, condition
+@pytest.mark.parametrize("dev", [False, True])
+def test_cli_defaults_to_experiment_and_explicit_fast_check(
+    harness, tmp_path, monkeypatch, dev
 ):
     called = []
 
-    async def paired(packages, jobs_dir, **kwargs):
-        called.append(kwargs["conditions"])
+    async def experiment_run(packages, jobs_dir, **kwargs):
+        called.append("experiment")
         return tmp_path
 
     monkeypatch.setattr(runner, "load_package", lambda path: harness[0])
     monkeypatch.setattr(runner, "ensure_image", lambda *args: None)
     monkeypatch.setattr(runner, "select_platform", lambda *args: "linux/amd64")
-    monkeypatch.setattr(runner, "run_experiment", paired)
+    monkeypatch.setattr(runner, "run_experiment", experiment_run)
     monkeypatch.setattr(
-        runner,
-        "run_check",
-        lambda package, args: called.append((args.dev, args.condition)),
+        runner, "run_check", lambda package, args: called.append("check")
     )
     argv = ["runner", "--challenge", "synthetic", "--live"]
     if dev:
         argv.append("--dev")
-    if condition:
-        argv.extend(["--condition", condition])
     monkeypatch.setattr(sys, "argv", argv)
     runner.main()
-    expected = (
-        (True, condition) if dev else (condition,) if condition else ("offline", "web")
-    )
-    assert called == [expected]
+    assert called == ["check" if dev else "experiment"]
 
 
 @pytest.mark.skipif(
     os.environ.get("RUN_DOCKER") != "1",
-    reason="Unpaid paired Harbor/Docker integration",
+    reason="Unpaid Harbor/Docker integration",
 )
-def test_six_independent_native_trials_with_mocked_apis(
+def test_three_independent_native_trials_with_mocked_apis(
     tmp_path, live_mock, reviewed_web
 ):
     config, replies, requests = live_mock
@@ -604,22 +585,22 @@ def test_six_independent_native_trials_with_mocked_apis(
         ensure_image(platform),
         platform,
     )
-    replies.extend(completion([api_call("submit", {"answer": SAFE})]) for _ in range(6))
+    replies.extend(completion([api_call("submit", {"answer": SAFE})]) for _ in range(3))
     folder = asyncio.run(
         experiment.run_experiment(
             [load_package(task)], tmp_path / "jobs", settings=config, seed=7
         )
     )
     report = experiment.report(folder)
-    assert len(requests) == 6 and len(report["attempts"]) == 6
-    assert len({row["attempt"] for row in report["attempts"]}) == 6
+    assert len(requests) == 3 and len(report["attempts"]) == 3
+    assert len({row["attempt"] for row in report["attempts"]}) == 3
     assert not report["complete"]
     for row in report["attempts"]:
         assert row["raw_solve"] == 1
         assert_isolation_and_cleanup((folder / row["path"]).parent)
         count(folder, row["attempt"])
     report = experiment.report(folder)
-    assert report["complete"] and report["clean_web_minus_offline"] == 0
+    assert report["complete"] and report["scores"]["clean_pass_at_1"] == 1
     assert report["retained_held_usd"] == 0
 
 
@@ -642,7 +623,7 @@ def reviewed(harness, tmp_path, monkeypatch):
     monkeypatch.setattr(autoreview, "verify_route", route)
     monkeypatch.setattr(autoreview, "ask", ask)
     monkeypatch.setattr(autoreview, "load_package", lambda root: harness[0])
-    folder = run(harness, tmp_path, conditions=("offline",))
+    folder = run(harness, tmp_path)
 
     def review_all():
         return asyncio.run(autoreview.run(folder, "key", ledger=None))
@@ -791,7 +772,7 @@ def test_web_content_the_labeller_rejects_goes_to_a_human(
         return {"verdict": "forbidden", "reason": "A writeup."}
 
     monkeypatch.setattr(autoreview, "ask", ask)
-    folder = run(harness, tmp_path / "web", conditions=("web",))
+    folder = run(harness, tmp_path / "web")
     delivered = {
         "id": "d1",
         "stage": "response",
@@ -817,14 +798,14 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
         '[budgets]\nelapsed_seconds = 1800\n[spending]\nattempt_limit_usd = "5"\n'
     )
 
-    async def paired(packages, jobs_dir, **kwargs):
+    async def experiment_run(packages, jobs_dir, **kwargs):
         seen.append(kwargs["settings"])
         return tmp_path
 
     monkeypatch.setattr(runner, "load_package", lambda path: harness[0])
     monkeypatch.setattr(runner, "ensure_image", lambda *args: None)
     monkeypatch.setattr(runner, "select_platform", lambda *args: "linux/amd64")
-    monkeypatch.setattr(runner, "run_experiment", paired)
+    monkeypatch.setattr(runner, "run_experiment", experiment_run)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -959,8 +940,8 @@ def test_triage_schema_compatibility_keeps_parser_length_limit():
 def test_raw_scores_remain_provisional_while_content_review_is_pending(reviewed):
     folder, _, _ = reviewed
     summary = experiment.report(folder)
-    assert not summary["complete"] and summary["condition_scores"] == {}
-    assert summary["provisional_raw_condition_scores"]["offline"]["raw_pass_at_1"] == 1
+    assert not summary["complete"] and summary["scores"] == {}
+    assert summary["provisional_raw_scores"]["raw_pass_at_1"] == 1
     assert all(r["clean_pass_at_1"] is None for r in summary["runs"])
     assert report.review_blockers(
         ["contamination_suspected", "harness_defect_suspected"],
@@ -982,13 +963,11 @@ def test_resume_preserves_finished_trials_and_replaces_attributed_timeout(
         "cost_usd": 0.01,
         "held_usd": 0,
     }
-    monkeypatch.setattr(experiment, "active", lambda folder: {("task-web", 1): row})
+    monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
     monkeypatch.setattr(
         experiment,
         "read_plan",
-        lambda folder: {
-            "jobs": [{"name": "task-web", "challenge": "task", "attempts": 1}]
-        },
+        lambda folder: {"jobs": [{"name": "task", "challenge": "task", "attempts": 1}]},
     )
     assert len(list(experiment.pending(None, "task"))) == expected
 
@@ -1001,7 +980,7 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     monkeypatch.setenv("DOCKER_CONTEXT", "synthetic")
     calls = []
     rows = {}
-    item = {"name": "task-web", "challenge": "task", "condition": "web", "attempts": 3}
+    item = {"name": "task", "challenge": "task", "attempts": 3}
     monkeypatch.setattr(experiment, "no_active_jobs", lambda *args: None)
     monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
@@ -1052,13 +1031,11 @@ def test_resume_skips_completed_trial_with_missing_cost(monkeypatch):
         "cost_usd": None,
         "held_usd": None,
     }
-    monkeypatch.setattr(experiment, "active", lambda folder: {("task-web", 1): row})
+    monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
     monkeypatch.setattr(
         experiment,
         "read_plan",
-        lambda folder: {
-            "jobs": [{"name": "task-web", "challenge": "task", "attempts": 1}]
-        },
+        lambda folder: {"jobs": [{"name": "task", "challenge": "task", "attempts": 1}]},
     )
     assert list(experiment.pending(None, "task")) == []
 
@@ -1107,13 +1084,11 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
         "cost_usd": 0.01,
         "review": None,
     }
-    monkeypatch.setattr(experiment, "active", lambda folder: {("task-web", 1): row})
+    monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
     monkeypatch.setattr(
         experiment,
         "read_plan",
-        lambda folder: {
-            "jobs": [{"name": "task-web", "challenge": "task", "attempts": 1}]
-        },
+        lambda folder: {"jobs": [{"name": "task", "challenge": "task", "attempts": 1}]},
     )
     assert len(list(experiment.pending(tmp_path, "task"))) == 1
     with pytest.raises(RuntimeError, match="API retry backoff"):

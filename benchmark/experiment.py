@@ -8,7 +8,6 @@ import copy
 import fcntl
 import json
 import logging
-import random
 import secrets
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -117,7 +116,6 @@ def replacement_lock(folder: Path):
 def create_plan(
     packages: list[Package],
     folder: Path,
-    conditions: tuple[str, ...],
     *,
     settings: dict,
     jobs_dir: Path,
@@ -126,44 +124,32 @@ def create_plan(
 ) -> dict:
     if not packages or len({package.id for package in packages}) != len(packages):
         raise ValueError("Select unique tasks")
-    if (
-        not conditions
-        or len(set(conditions)) != len(conditions)
-        or set(conditions) - {"offline", "web"}
-    ):
-        raise ValueError("Select offline, web or both conditions")
-    generator_seed = secrets.randbits(64) if seed is None else seed
-    generator = random.Random(generator_seed)
-    jobs = []
     count = 1 if dev else settings["runs"]["independent_attempts"]
+    jobs = []
     for package in packages:
-        if "web" in conditions:
-            reviewer_context(package)  # Complete admission before any paid job.
-        order = list(conditions)
-        generator.shuffle(order)
-        for condition in order:
-            jobs.append(
-                {
-                    "challenge": package.id,
-                    "category": package.manifest["category"],
-                    "answer_type": package.manifest["answer_type"],
-                    "reward_weights": reward_weights(
-                        package.manifest.get("reward_weights"),
-                        answer_type=package.manifest["answer_type"],
-                    ),
-                    "task": str(package.root.resolve()),
-                    "condition": condition,
-                    "name": f"{package.id}-{condition}",
-                    "attempts": count,
-                }
-            )
+        reviewer_context(package)  # Complete admission before any paid job.
+        jobs.append(
+            {
+                "challenge": package.id,
+                "category": package.manifest["category"],
+                "answer_type": package.manifest["answer_type"],
+                "reward_weights": reward_weights(
+                    package.manifest.get("reward_weights"),
+                    answer_type=package.manifest["answer_type"],
+                ),
+                "task": str(package.root.resolve()),
+                "name": package.id,
+                "attempts": count,
+            }
+        )
     plan = {
-        "version": 3,
+        "version": 4,
         "jobs_dir": str(jobs_dir.resolve()),
         "job_prefix": f"{folder.name.removeprefix('experiment-')}-{settings['models']['agent'].rsplit('/', 1)[-1]}",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "development": dev,
-        "seed": generator_seed,
+        # Selects the optional human audit sample.
+        "seed": secrets.randbits(64) if seed is None else seed,
         "settings": copy.deepcopy(settings),
         "jobs": jobs,
         "inputs": fingerprint(jobs),
@@ -205,7 +191,7 @@ def _planned_job(plan: dict, item: dict, slot, replaces) -> tuple[str, JobConfig
         "name": "ariadne",
         "import_path": "benchmark.agent:LiveAgent",
         "model_name": plan["settings"]["models"]["agent"],
-        "kwargs": {"condition": item["condition"], "config": plan["settings"]},
+        "kwargs": {"config": plan["settings"]},
     }
     config = job_config(
         Path(item["task"]),
@@ -437,7 +423,6 @@ async def run_experiment(
     packages: list[Package],
     jobs_dir: Path,
     *,
-    conditions=("offline", "web"),
     settings=None,
     seed=None,
     dev=False,
@@ -453,7 +438,6 @@ async def run_experiment(
     create_plan(
         packages,
         folder,
-        conditions,
         settings=settings,
         jobs_dir=jobs_dir,
         dev=dev,
@@ -603,10 +587,7 @@ def main() -> None:
     summary = report(folder)
     print(
         json.dumps(
-            {
-                key: summary[key]
-                for key in ("status", "condition_scores", "clean_web_minus_offline")
-            },
+            {key: summary[key] for key in ("status", "scores")},
             indent=2,
         )
     )

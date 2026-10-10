@@ -479,9 +479,9 @@ class ReviewerContext(Record):
 
 
 def reviewer_context(package: Package) -> dict:
-    """The package's reviewed reviewer context, required for the web condition."""
+    """The package's reviewed reviewer context, required for web access."""
     if package.manifest.get("reviewer_context_status") != "ready":
-        raise ValueError("The web condition needs a ready reviewer context")
+        raise ValueError("Web access needs a ready reviewer context")
     path = package_path(package.root, package.manifest["reviewer_context"])
     if not path.relative_to(package.root).as_posix().startswith("private/"):
         raise ValueError("Reviewer context must be private")
