@@ -113,8 +113,8 @@ charge in `logs/spending.sqlite3`; keep that file between runs. Only the Ariadne
 agent goes through these controls, so do not run Harbor's built-in paid agents
 on these tasks.
 
-Two long pwn-01 attempts with a two-hour limit, outside the protocol, are
-public on Harbor Hub:
+Two exploratory pwn-01 attempts with a two-hour limit, outside the protocol,
+are public on Harbor Hub:
 [Mistral Large 4](https://hub.harborframework.com/jobs/5a0efd58-917f-4043-a8f6-eb8b9067f798)
 and [MiMo v2.6 Pro](https://hub.harborframework.com/jobs/b0cfd841-d296-4a79-b5a9-72193aa16219).
 Neither solved the task; both ran out of context before time.
