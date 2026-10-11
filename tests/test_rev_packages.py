@@ -44,7 +44,7 @@ def assert_package_record(package_id: str) -> None:
     context = private_context(package.root)
     assert data["status"] == "ready"
     assert data["reviewer_context_status"] == "ready"
-    assert data["admission"]["pending"] == []
+    assert "admission" not in data
     assert "executable_files" not in data
     assert context["context_version"] == "v2"
     assert context["recognition_markers"] == []

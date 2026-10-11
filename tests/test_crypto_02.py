@@ -59,9 +59,9 @@ def test_pinned_upstream_files_match_and_execution_stays_disabled():
     )
     assert "sandbox_compose" not in manifest  # the shared agent image
     assert not (PACKAGE / "files").exists()
-    # Executable for reference runs; admission is tracked separately.
+    # Executable for reference runs.
     assert manifest["status"] == "ready"
-    assert manifest["admission"]["pending"] == []
+    assert "admission" not in manifest
     assert manifest["reviewer_context_status"] == "ready"
     assert load_package(PACKAGE).id == "crypto-02"
 

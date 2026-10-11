@@ -17,11 +17,11 @@ HANDOUT = {
 }
 
 
-def test_package_loads_while_follow_up_admission_items_remain():
+def test_package_loads_with_closed_admission():
     package = load_package(PACKAGE)
     assert package.manifest["status"] == "ready"
     assert package.manifest["reviewer_context_status"] == "ready"
-    assert package.manifest["admission"]["pending"]
+    assert "admission" not in package.manifest
     assert package.manifest["target_seccomp"] == "service/seccomp.json"
 
 

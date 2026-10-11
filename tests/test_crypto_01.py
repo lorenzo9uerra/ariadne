@@ -80,7 +80,7 @@ def test_pinned_upstream_files_match_and_package_loads():
     assert manifest["status"] == "ready"
     assert manifest["role"] == "benchmark"
     assert manifest["reviewer_context_status"] == "ready"
-    assert manifest["admission"]["pending"] == []
+    assert "admission" not in manifest
     assert (PACKAGE / "private/secrets.txt").read_text() == ""
     package = load_package(PACKAGE)
     assert package.id == "crypto-01"
