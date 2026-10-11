@@ -5,7 +5,9 @@ evaluation host lacks, typically x86-64 pwn and rev binaries on an ARM machine,
 where emulation is slow and debuggers fail. Ariadne itself stays on the
 evaluation host and reaches the VM's Docker engine through a Docker context
 over SSH, so keys, records and the spending ledger never leave it. The VM also
-gives the sandboxes a kernel separate from the evaluation host's.
+gives the sandboxes their own kernel, so a kernel exploit from a sandbox would
+reach only the VM, which makes it the recommended Docker host for model runs on
+any architecture.
 
 ## Requirements
 
