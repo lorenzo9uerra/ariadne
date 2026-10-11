@@ -135,25 +135,10 @@ def journal(folder: Path):
 
 
 def read_plan(folder: Path) -> dict:
-    """The frozen plan, with any configuration updates from the journal applied.
-
-    No current command writes configuration updates; they come from the former
-    continuation script, and older experiments still need them applied.
-    """
-    path = folder / "private/plan.json"
-    plan = json.loads(path.read_text())
+    """The experiment's frozen plan."""
+    plan = json.loads((folder / "private/plan.json").read_text())
     if plan.get("version") != 4:
         raise ValueError("Unsupported experiment plan version")
-    with journal(folder) as (events, _):
-        updates = [
-            event for event in events if event["event"] == "configuration_update"
-        ]
-    for update in updates:
-        if update["original_plan_sha256"] != digest(path):
-            raise ValueError("Original plan changed after the configuration review")
-        plan.update(
-            {key: update[key] for key in ("settings", "inputs", "implementation")}
-        )
     return plan
 
 

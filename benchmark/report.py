@@ -337,20 +337,6 @@ def report(folder: Path) -> dict:
         ],
         **accounting(rows, counted),
         "automatic_review": automatic_review(events),
-        "configuration_updates": [
-            {
-                key: event[key]
-                for key in (
-                    "time",
-                    "reviewer",
-                    "evidence",
-                    "note",
-                    "changed_input_files",
-                )
-            }
-            for event in events
-            if event["event"] == "configuration_update"
-        ],
     }
     write_json(folder / "summary.json", summary)
     return summary
