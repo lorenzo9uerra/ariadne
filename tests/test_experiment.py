@@ -1,7 +1,6 @@
 """Independent repetitions, reviewed attribution and retained native evidence."""
 
 import asyncio
-import copy
 import fcntl
 import json
 import os
@@ -29,6 +28,7 @@ from benchmark.tasks import ROOT, load_package
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
     SAFE,
+    TEST_MODEL,
     api_call,
     assert_isolation_and_cleanup,
     completion,
@@ -160,7 +160,7 @@ def harness(tmp_path, monkeypatch):
                     )
 
     monkeypatch.setattr(experiment, "Job", FakeJob)
-    return package, copy.deepcopy(load_draft()), outcomes, configs
+    return package, load_draft(model=TEST_MODEL), outcomes, configs
 
 
 def run(harness, tmp_path, **kwargs):

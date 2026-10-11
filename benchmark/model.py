@@ -199,7 +199,7 @@ class OpenRouterModel:
         if not generation_id or remaining <= 0:
             return
         entry["billing_status"] = "unconfirmed"
-        timeout = min(remaining, self.config["live"]["preflight_timeout_seconds"])
+        timeout = min(remaining, self.config["requests"]["preflight_timeout_seconds"])
         try:
             response = await asyncio.wait_for(
                 client.get(
@@ -224,7 +224,7 @@ class OpenRouterModel:
             ):
                 return
             charge = amount(data.get("total_cost"))
-            if data.get("provider_name") != self.config["live"][
+            if data.get("provider_name") != self.config["agent_route"][
                 "provider_name"
             ] and not (data.get("provider_name") is None and charge == 0):
                 return
@@ -314,7 +314,7 @@ class OpenRouterModel:
             messages,
             tools,
             self.config["models"]["agent"],
-            self.config["live"].get("token_encoding"),
+            self.config["agent_route"].get("token_encoding"),
         )
         output = min(
             self.config["budgets"]["agent_max_output_tokens"],
@@ -326,12 +326,12 @@ class OpenRouterModel:
             "model": self.config["models"]["agent"].removeprefix("openrouter/"),
             "messages": messages,
             "tools": tools,
-            "temperature": self.config["live"]["temperature"],
+            "temperature": self.config["agent_route"]["temperature"],
             "provider": routing(self.config),
-            self.config["live"]["output_token_parameter"]: output,
+            self.config["agent_route"]["output_token_parameter"]: output,
         }
-        if "reasoning" in self.config["live"]:
-            body["reasoning"] = {"enabled": self.config["live"]["reasoning"]}
+        if "reasoning" in self.config["agent_route"]:
+            body["reasoning"] = {"enabled": self.config["agent_route"]["reasoning"]}
         return body, estimate, output
 
     async def _attempt(
@@ -379,7 +379,7 @@ class OpenRouterModel:
         data = response.json()
         entry.update(status="received", response=data)
         charge, generation_id = billed_response(
-            data, self.config["live"]["provider_name"]
+            data, self.config["agent_route"]["provider_name"]
         )
         self.ledger.settle(request_id, charge, generation_id)
         usage = usage_fields(data)
@@ -405,12 +405,11 @@ class OpenRouterModel:
 
         The wait stops the attempt's clock while its allowance lasts.
         """
-        live = self.config["live"]
+        timings = self.config["requests"]
         prefix = "rate_limit_retry" if entry.get("http_status") == 429 else "retry"
         delay = min(
-            live.get(f"{prefix}_initial_seconds", live["retry_initial_seconds"])
-            * 2**attempt,
-            live.get(f"{prefix}_max_seconds", live["retry_max_seconds"]),
+            timings[f"{prefix}_initial_seconds"] * 2**attempt,
+            timings[f"{prefix}_max_seconds"],
         )
         delay = max(delay, entry.get("retry_after_seconds", 0))
         entry["retry_wait_seconds"] = delay

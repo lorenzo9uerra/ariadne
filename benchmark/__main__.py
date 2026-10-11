@@ -29,8 +29,9 @@ def main() -> None:
     )
     start.add_argument(
         "--model",
-        choices=tuple(load_draft().get("agents", {})),
-        help="Reviewed OpenRouter agent profile (default: configured baseline)",
+        required=True,
+        choices=tuple(load_draft()["agents"]),
+        help="Reviewed OpenRouter agent profile from benchmark/draft.toml",
     )
     start.add_argument(
         "--limits", type=Path, help="TOML overrides for execution and spending limits"

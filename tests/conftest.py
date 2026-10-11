@@ -10,7 +10,7 @@ import pytest
 from benchmark.budgets import load_draft
 from benchmark.costs import Prices
 from sandbox.docker_host import ensure_image, image_tag, select_platform
-from tests.support import GOOD, chat_reply, completion, endpoint_data
+from tests.support import GOOD, TEST_MODEL, chat_reply, completion, endpoint_data
 
 PLATFORM = os.environ.get("SANDBOX_PLATFORM", "linux/arm64")
 
@@ -36,7 +36,7 @@ def live_mock(tmp_path, monkeypatch, request):
         "benchmark.model.preflight", lambda config, key: Prices.from_config(config)
     )
     monkeypatch.setattr("benchmark.model.input_tokens", lambda *args: 128)
-    config = copy.deepcopy(load_draft())
+    config = load_draft(model=TEST_MODEL)
     config["budgets"]["agent_turns"] = 2
     config["budgets"]["model_retries"] = 0
     replies = []

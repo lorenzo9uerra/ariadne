@@ -21,6 +21,7 @@ from benchmark.costs import (
     preflight,
     routing,
 )
+from tests.support import TEST_MODEL
 
 
 def key_data():
@@ -33,17 +34,29 @@ def key_data():
 
 
 def endpoint_data():
+    """OpenRouter's listing for the test profile's pinned endpoint."""
+    config = load_draft(model=TEST_MODEL)
+    route, pricing = config["agent_route"], config["agent_route"]["pricing"]
+
+    def per_token(key):
+        return str(Decimal(pricing[key]) / 1_000_000)
+
     return {
         "endpoints": [
             {
-                "tag": "azure",
-                "context_length": 1047576,
-                "max_completion_tokens": 32768,
-                "supported_parameters": ["tools", "max_completion_tokens"],
+                "tag": route["provider"],
+                "context_length": pricing["context_tokens"],
+                "max_completion_tokens": config["budgets"]["agent_max_output_tokens"],
+                "supported_parameters": [
+                    "tools",
+                    "reasoning",
+                    route["output_token_parameter"],
+                ],
                 "pricing": {
-                    "prompt": "0.0000004",
-                    "completion": "0.0000016",
-                    "input_cache_read": "0.0000001",
+                    "prompt": per_token("input_per_million"),
+                    "completion": per_token("output_per_million"),
+                    "input_cache_read": per_token("cached_input_per_million"),
+                    "discount": pricing["discount"],
                 },
             }
         ],
@@ -234,9 +247,10 @@ def test_key_limit_is_provider_configuration():
 
 
 def test_full_context_reservation_and_verified_rates():
-    config = load_draft()
+    config = load_draft(model=TEST_MODEL)
     prices = Prices.from_config(config)
-    assert prices.reservation(16384) == Decimal("0.4452448")
+    # Full context at the input rate plus the output allowance.
+    assert prices.reservation(16384) == Decimal("0.74727424")
     check_endpoint(endpoint_data(), config, prices)
 
 
@@ -250,7 +264,7 @@ def test_full_context_reservation_and_verified_rates():
     ],
 )
 def test_endpoint_limits_and_provider_changes_stop_run(field, value):
-    config = load_draft()
+    config = load_draft(model=TEST_MODEL)
     data = endpoint_data()
     data["endpoints"][0][field] = value
     with pytest.raises(CostAccountingError):
@@ -267,7 +281,7 @@ def test_endpoint_limits_and_provider_changes_stop_run(field, value):
     ],
 )
 def test_endpoint_price_changes_stop_run(field, value):
-    config = load_draft()
+    config = load_draft(model=TEST_MODEL)
     data = endpoint_data()
     data["endpoints"][0]["pricing"][field] = value
     with pytest.raises(CostAccountingError):
@@ -319,13 +333,13 @@ def test_prepaid_billing_can_include_upstream_cost_details():
 
 
 def test_routing_is_pinned_without_provider_fallback():
-    config = load_draft()
-    assert routing(config)["only"] == [config["live"]["provider"]]
+    config = load_draft(model=TEST_MODEL)
+    assert routing(config)["only"] == [config["agent_route"]["provider"]]
     assert routing(config)["allow_fallbacks"] is False
 
 
 def test_preflight_checks_key_and_endpoint(monkeypatch):
-    config = load_draft()
+    config = load_draft(model=TEST_MODEL)
     calls = []
 
     def read(path, key, timeout):
@@ -334,11 +348,11 @@ def test_preflight_checks_key_and_endpoint(monkeypatch):
 
     monkeypatch.setattr("benchmark.costs.read_json", read)
     assert preflight(config, "synthetic") == Prices.from_config(config)
-    assert calls == ["/key", "/models/openai/gpt-4.1-mini/endpoints"]
+    assert calls == ["/key", "/models/mistralai/mistral-large-4-0/endpoints"]
     with pytest.raises(CostAccountingError):
         preflight(config, "")
     config = copy.deepcopy(config)
-    config["enable_live"] = False
+    del config["agent_route"]
     with pytest.raises(CostAccountingError):
         preflight(config, "synthetic")
 
@@ -365,10 +379,11 @@ def test_selected_profile_prices_and_reservations(model):
     assert config["budgets"]["agent_max_output_tokens"] == (
         262144 if is_mistral else 131072
     )
-    assert config["live"]["reasoning"] is True
-    assert config["live"]["temperature"] == 0.6
+    assert config["agent_route"]["reasoning"] is True
+    assert config["agent_route"]["temperature"] == 0.6
     assert "limit_usd" not in config["spending"]
-    assert load_draft()["models"]["agent"] == "openrouter/openai/gpt-4.1-mini"
+    default = load_draft()
+    assert "agent" not in default["models"] and "agent_route" not in default
     if not is_mistral:
         assert prices.reservation(131072) == Decimal("0.41160384")
 
@@ -396,9 +411,9 @@ def test_discount_change_stops_the_pinned_route():
 def test_mimo_uses_official_thinking_mode_and_prices():
     config = load_draft(model="xiaomi/mimo-v2.6-pro")
     prices = Prices.from_config(config)
-    assert config["live"]["provider"] == "xiaomi/fp8"
-    assert config["live"]["provider_name"] == "Xiaomi"
-    assert config["live"]["reasoning"] is True
-    assert config["live"]["temperature"] == 1.0
+    assert config["agent_route"]["provider"] == "xiaomi/fp8"
+    assert config["agent_route"]["provider_name"] == "Xiaomi"
+    assert config["agent_route"]["reasoning"] is True
+    assert config["agent_route"]["temperature"] == 1.0
     assert config["budgets"]["agent_max_output_tokens"] == 131072
     assert prices.reservation(131072) == Decimal("0.57016320")

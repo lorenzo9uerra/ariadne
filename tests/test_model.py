@@ -21,7 +21,7 @@ from benchmark.model import (
     pre_inference_rejection,
     retry_after,
 )
-from tests.support import completion
+from tests.support import TEST_MODEL, completion
 
 
 @pytest.fixture
@@ -32,14 +32,20 @@ def model_factory(tmp_path, monkeypatch):
     monkeypatch.setattr("benchmark.model.input_tokens", lambda *args: 128)
     counter = 0
 
-    def create(handler, config=None, *, attempt_limit=2):
+    def create(handler, config=None, *, holds=4.5, attempt_limit=...):
+        """attempt_limit defaults to `holds` requests' worth of reservations."""
         nonlocal counter
         counter += 1
-        config = copy.deepcopy(config or load_draft())
-        config["live"]["retry_initial_seconds"] = 0
-        config["live"]["retry_max_seconds"] = 0
-        config["live"]["rate_limit_retry_initial_seconds"] = 0
-        config["live"]["rate_limit_retry_max_seconds"] = 0
+        config = copy.deepcopy(config or load_draft(model=TEST_MODEL))
+        if attempt_limit is ...:
+            output = config["budgets"]["agent_max_output_tokens"]
+            attempt_limit = holds * float(
+                Prices.from_config(config).reservation(output)
+            )
+        config["requests"]["retry_initial_seconds"] = 0
+        config["requests"]["retry_max_seconds"] = 0
+        config["requests"]["rate_limit_retry_initial_seconds"] = 0
+        config["requests"]["rate_limit_retry_max_seconds"] = 0
         ledger = Ledger(tmp_path / f"spending-{counter}.sqlite3", 10, attempt_limit)
         audit = AuditTrail(
             "synthetic-run", "synthetic-sample", tmp_path / f"audit-{counter}.jsonl"
@@ -82,11 +88,11 @@ def test_request_is_reserved_and_routed_before_response(model_factory):
         assert model is not None
         assert model.ledger.totals()["held_usd"] > 0
         body = json.loads(request.content)
-        assert body["provider"]["only"] == ["azure"]
+        assert body["provider"]["only"] == ["mistral"]
         assert body["provider"]["allow_fallbacks"] is False
-        assert body["max_completion_tokens"] == 16384
-        assert "max_tokens" not in body
-        assert body["temperature"] == 0
+        assert body["max_tokens"] == model.config["budgets"]["agent_max_output_tokens"]
+        assert "max_completion_tokens" not in body
+        assert body["temperature"] == model.config["agent_route"]["temperature"]
         return httpx.Response(200, json=completion(prompt_tokens=70000))
 
     model = model_factory(reply)
@@ -182,7 +188,7 @@ def test_explicit_pool_rejection_does_not_exhaust_spending_or_claim_zero_charge(
             )
         return httpx.Response(200, json=completion())
 
-    model = model_factory(reply, attempt_limit=0.5)
+    model = model_factory(reply, holds=1.1)
     generate(model)
     totals = model.ledger.totals()
     assert totals["held_usd"] == 0
@@ -247,12 +253,12 @@ def test_backoff_and_optional_attempt_cap(
                 status, headers={"Retry-After": header} if header else {}
             )
         data = completion()
-        data["provider"] = config["live"]["provider_name"]
+        data["provider"] = config["agent_route"]["provider_name"]
         return httpx.Response(200, json=data)
 
     model = model_factory(reply, config, attempt_limit=None)
-    model.config["live"].update(
-        {key: value for key, value in config["live"].items() if "retry" in key}
+    model.config["requests"].update(
+        {key: value for key, value in config["requests"].items() if "retry" in key}
     )
     generate(model, deadline_seconds=900)
     assert calls == 8 and waits == delays
@@ -264,8 +270,8 @@ def test_retry_wait_beyond_the_allowance_counts_against_the_attempt(
     model_factory,
 ):
     model = model_factory(lambda request: httpx.Response(429), attempt_limit=None)
-    model.config["live"]["rate_limit_retry_initial_seconds"] = 30
-    model.config["live"]["rate_limit_retry_max_seconds"] = 120
+    model.config["requests"]["rate_limit_retry_initial_seconds"] = 30
+    model.config["requests"]["rate_limit_retry_max_seconds"] = 120
     with pytest.raises(TimeoutError, match="retry backoff"):
         generate(model, deadline_seconds=20, wait_allowance=5)
     assert len(model.audit.items) == 1
@@ -279,8 +285,8 @@ def test_retry_wait_within_the_allowance_stops_the_clock(
     replies = iter([httpx.Response(status), httpx.Response(200, json=completion())])
     model = model_factory(lambda request: next(replies), attempt_limit=None)
     for prefix in ("rate_limit_retry", "retry"):
-        model.config["live"][f"{prefix}_initial_seconds"] = 30
-        model.config["live"][f"{prefix}_max_seconds"] = 120
+        model.config["requests"][f"{prefix}_initial_seconds"] = 30
+        model.config["requests"][f"{prefix}_max_seconds"] = 120
     waits = []
 
     async def sleep(delay):
@@ -310,7 +316,7 @@ def test_spending_cap_prevents_another_request(model_factory):
     with pytest.raises(SpendingLimit):
         generate(model)
     assert count == 4
-    assert model.ledger.totals()["held_usd"] < 2
+    assert model.ledger.totals()["held_usd"] * 1_000_000 < model.ledger.attempt_limit
 
 
 def test_cancelled_request_keeps_its_hold(model_factory):
@@ -390,7 +396,7 @@ def test_reasoning_profile_request_and_billing(model_factory, model_id):
         body = json.loads(request.content)
         requests.append(body)
         assert body["model"] == model_id
-        assert body["provider"]["only"] == [config["live"]["provider"]]
+        assert body["provider"]["only"] == [config["agent_route"]["provider"]]
         assert body["reasoning"] == {"enabled": True}
         assert body["temperature"] == (
             1.0 if model_id == "xiaomi/mimo-v2.6-pro" else 0.6
@@ -398,7 +404,7 @@ def test_reasoning_profile_request_and_billing(model_factory, model_id):
         assert body["max_tokens"] == config["budgets"]["agent_max_output_tokens"]
         assert "max_completion_tokens" not in body
         data = completion()
-        data["provider"] = config["live"]["provider_name"]
+        data["provider"] = config["agent_route"]["provider_name"]
         data["choices"][0]["message"] = message
         return httpx.Response(200, json=data)
 
@@ -454,7 +460,7 @@ def test_error_diagnostics_redact_credentials_and_keep_correlation_ids():
                 "code": 429,
                 "message": "Rejected synthetic-key and Bearer other-secret",
                 "metadata": {
-                    "provider_name": "Azure",
+                    "provider_name": "Mistral",
                     "raw": "sk-or-v1-another-key",
                     "limit_source": "openrouter_in_flight_budget",
                     "ignored": "private",
@@ -476,7 +482,7 @@ def test_error_diagnostics_redact_credentials_and_keep_correlation_ids():
     assert details["generation_id"] == "gen-synthetic-error"
     assert details["provider_request_id"] == "request-123"
     assert details["retry_after_seconds"] == 12
-    assert details["api_error"]["provider_name"] == "Azure"
+    assert details["api_error"]["provider_name"] == "Mistral"
     assert details["api_error"]["limit_source"] == "openrouter_in_flight_budget"
     response.headers["X-Generation-Id"] = "gen-conflicting"
     assert "generation_id" not in error_details(response, "synthetic-key")
@@ -522,7 +528,7 @@ def test_confirmed_error_charges_release_holds_before_retry(model_factory, monke
                 },
             )
         data = completion()
-        data["provider"] = config["live"]["provider_name"]
+        data["provider"] = config["agent_route"]["provider_name"]
         return httpx.Response(200, json=data)
 
     model = model_factory(reply, config, attempt_limit=3)
@@ -552,13 +558,13 @@ def test_confirmed_error_charges_release_holds_before_retry(model_factory, monke
     ],
 )
 def test_error_lookup_requires_confirmed_matching_billing(model_factory, defect):
-    config = load_draft()
+    config = load_draft(model=TEST_MODEL)
     config["budgets"]["model_retries"] = 0
     requests = []
     metadata = {
         "id": "gen-synthetic-error",
-        "model": "openai/gpt-4.1-mini",
-        "provider_name": config["live"]["provider_name"],
+        "model": "mistralai/mistral-large-4-0",
+        "provider_name": config["agent_route"]["provider_name"],
         "is_byok": False,
         "finish_reason": "error",
         "total_cost": 0.007,

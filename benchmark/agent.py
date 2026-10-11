@@ -190,9 +190,11 @@ class AriadneAgent(BaseAgent):
 
     def __init__(self, *args, config=None, **kwargs):
         model_name = kwargs.pop("model_name", None)
-        self.config = config or load_draft()
-        if config is None and model_name not in (None, self.config["models"]["agent"]):
-            self.config = load_draft(model=model_name)
+        if config is None:
+            if model_name is None:
+                raise ValueError("Choose an agent profile with -m openrouter/<model>")
+            config = load_draft(model=model_name)
+        self.config = config
         if model_name not in (None, self.config["models"]["agent"]):
             raise ValueError("Review the configuration before changing the model")
         super().__init__(*args, model_name=self.config["models"]["agent"], **kwargs)
@@ -270,7 +272,7 @@ class AriadneAgent(BaseAgent):
         ].removeprefix("openrouter/"):
             raise CostAccountingError("Agent and reviewer must use different models")
         monitor.audit = self.audit
-        await monitor.check_route(self.config["live"]["preflight_timeout_seconds"])
+        await monitor.check_route(self.config["requests"]["preflight_timeout_seconds"])
         self.monitor = monitor
         self.backend = LiveBackend(
             tavily_key,
@@ -508,8 +510,8 @@ class AgentAttempt:
         context.metadata = {
             "budgets": dict(self.limits),
             "model": agent.model_name,
-            "provider": agent.config["live"]["provider"],
-            "prices": dict(agent.config["live"]["pricing"]),
+            "provider": agent.config["agent_route"]["provider"],
+            "prices": dict(agent.config["agent_route"]["pricing"]),
             "stop_reason": session.stop_reason or self.stop,
             "turns": self.turns,
             "non_submit_proposals": session.counters.non_submit,

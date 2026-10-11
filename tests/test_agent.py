@@ -25,6 +25,7 @@ from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import AriadneDockerEnvironment
 from tests.support import (
     SAFE,
+    TEST_MODEL,
     WRONG,
     api_call,
     ariadne_agent,
@@ -629,7 +630,9 @@ def test_over_budget_arguments_are_counted_without_json_parsing(tmp_path, live_m
 def test_ariadne_agent_rejects_alternate_host_environment(tmp_path):
     with pytest.raises(ValueError, match="Extra environment"):
         AriadneAgent(
-            logs_dir=tmp_path, extra_env={"OPENROUTER_API_KEY": "synthetic-key"}
+            logs_dir=tmp_path,
+            model_name="openrouter/" + TEST_MODEL,
+            extra_env={"OPENROUTER_API_KEY": "synthetic-key"},
         )
 
 

@@ -158,8 +158,14 @@ def create_plan(
     return plan
 
 
-def collect(folder: Path, job_name: str) -> None:
-    """Bind completed native results; preserve pending evidence after interruptions."""
+def record_results(folder: Path, job_name: str) -> None:
+    """Journal the hash of each finished trial's result.json in this job.
+
+    The journal already has an "attempt" event for every trial the job started.
+    Each finished trial gets one "result" event with its file's hash, so a later
+    edit to that file is detected. Trials without a result.json yet, such as one
+    cut off by an interruption, are left for a later call. Safe to repeat.
+    """
     with journal(folder) as (events, append):
         recorded = {event["attempt"] for event in events if event["event"] == "result"}
         for event in list(events):
@@ -274,7 +280,7 @@ async def execute_job(
         nonlocal trial_error
         try:
             assert on_trial_result is not None
-            collect(folder, name)
+            record_results(folder, name)
             row = next(
                 row
                 for row in report(folder)["attempts"]
@@ -313,7 +319,7 @@ async def execute_job(
         with journal(folder) as (_, append):
             append("job_ended", job=name, status="finished")
     finally:
-        collect(folder, name)
+        record_results(folder, name)
 
 
 def active(folder):

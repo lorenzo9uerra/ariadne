@@ -41,15 +41,16 @@ class AttemptClock:
 def load_draft(
     path: Path | None = None, *, model: str | None = None, limits: Path | None = None
 ) -> dict:
+    """The approved settings; with a model, also its route from [agents.*]."""
     config = tomllib.loads((path or Path(__file__).with_name("draft.toml")).read_text())
     if model is not None:
         model = model.removeprefix("openrouter/")
         if model not in config.get("agents", {}):
             raise ValueError("Choose a model profile declared in benchmark/draft.toml")
-        profile = copy.deepcopy(config["agents"][model])
+        route = copy.deepcopy(config["agents"][model])
         config["models"]["agent"] = "openrouter/" + model
-        config["budgets"]["agent_max_output_tokens"] = profile.pop("max_output_tokens")
-        config["live"].update(profile)
+        config["budgets"]["agent_max_output_tokens"] = route.pop("max_output_tokens")
+        config["agent_route"] = route
     if limits is not None:
         apply_limits(config, tomllib.loads(limits.read_text()))
     return config

@@ -1,4 +1,4 @@
-"""Persistent request reservations and OpenRouter billing checks for live runs."""
+"""Persistent request reservations and OpenRouter billing checks for paid runs."""
 
 import json
 import os
@@ -247,7 +247,7 @@ class Prices:
 
     @classmethod
     def from_config(cls, config: dict) -> "Prices":
-        pricing = config["live"]["pricing"]
+        pricing = config["agent_route"]["pricing"]
         context = pricing["context_tokens"]
         if type(context) is not int or context <= 0:
             raise CostAccountingError("A positive context-token bound is required")
@@ -289,11 +289,11 @@ def check_key(data: dict) -> None:
 
 
 def check_endpoint(data: dict, config: dict, prices: Prices) -> None:
-    live = config["live"]
+    route = config["agent_route"]
     endpoints = [
         endpoint
         for endpoint in data["endpoints"]
-        if endpoint["tag"] == live["provider"]
+        if endpoint["tag"] == route["provider"]
     ]
     if len(endpoints) != 1:
         raise CostAccountingError("The pinned OpenRouter endpoint is unavailable")
@@ -309,16 +309,19 @@ def check_endpoint(data: dict, config: dict, prices: Prices) -> None:
         != prices.cached_input
         or amount(pricing.get("input_cache_write") or 0) * MICRODOLLARS
         != prices.cache_write
-        or discount != amount(live["pricing"].get("discount", 0))
+        or discount != amount(route["pricing"].get("discount", 0))
         or amount(pricing.get("request", 0)) != 0
         or endpoint["context_length"] != prices.context_tokens
         or endpoint.get("max_prompt_tokens") != prices.max_prompt_tokens
-        or ("reasoning" in live and "reasoning" not in endpoint["supported_parameters"])
+        or (
+            "reasoning" in route and "reasoning" not in endpoint["supported_parameters"]
+        )
         or endpoint["max_completion_tokens"]
         < config["budgets"]["agent_max_output_tokens"]
         or "tools" not in endpoint["supported_parameters"]
-        or live["output_token_parameter"] not in ("max_tokens", "max_completion_tokens")
-        or live["output_token_parameter"] not in endpoint["supported_parameters"]
+        or route["output_token_parameter"]
+        not in ("max_tokens", "max_completion_tokens")
+        or route["output_token_parameter"] not in endpoint["supported_parameters"]
     ):
         raise CostAccountingError(
             "Pinned model pricing or limits changed; review config"
@@ -327,7 +330,7 @@ def check_endpoint(data: dict, config: dict, prices: Prices) -> None:
 
 def routing(config: dict) -> dict:
     return {
-        "only": [config["live"]["provider"]],
+        "only": [config["agent_route"]["provider"]],
         "allow_fallbacks": False,
         "require_parameters": True,
         "max_price": {
@@ -339,13 +342,13 @@ def routing(config: dict) -> dict:
 
 def preflight(config: dict, api_key: str) -> Prices:
     """Check configured pricing, routing and the provider-side key allowance."""
-    name = config["models"]["agent"]
-    if not config["enable_live"] or not name.startswith("openrouter/"):
-        raise CostAccountingError("The configured OpenRouter route is disabled")
+    name = config["models"].get("agent", "")
+    if "agent_route" not in config or not name.startswith("openrouter/"):
+        raise CostAccountingError("Choose an agent profile with --model")
     if not api_key:
         raise CostAccountingError("OPENROUTER_API_KEY is required")
     prices = Prices.from_config(config)
-    timeout = config["live"]["preflight_timeout_seconds"]
+    timeout = config["requests"]["preflight_timeout_seconds"]
     check_key(read_json("/key", api_key, timeout))
     model_id = name.removeprefix("openrouter/")
     check_endpoint(

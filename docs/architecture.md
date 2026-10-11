@@ -345,8 +345,8 @@ agent; it is not an access-control mechanism for people using the host.
 
 `python -m benchmark run` freezes the settings and input hashes, then starts
 one native Harbor job that runs three fresh trials of each task. Pass several
-task names after `--task` to include them in one experiment; omitting
-`--model` uses the configured baseline. Run the same task set for every model,
+task names after `--task` to include them in one experiment; `--model` is
+required and names one of the declared profiles. Run the same task set for every model,
 and check task eligibility under
 [protocol section 8.3](benchmark_protocol.md#83-benchmark-and-development-challenges)
 before treating a comparison as a counted benchmark. Harbor's trial

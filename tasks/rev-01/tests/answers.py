@@ -18,38 +18,40 @@ def answer_metrics(answer_type: str) -> tuple[str, ...]:
     raise ValueError("Unsupported answer type")
 
 
+REWARD_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
+# Far above any real weight; the cap also keeps every sum finite.
+MAX_WEIGHT = 1000
+
+
 def reward_weights(
     value: object = None, *, answer_type: str | None = None
 ) -> dict[str, float]:
-    """Validate a task's nonnegative weights; success always has positive weight."""
+    """A task's validated reward weights; success alone when none are declared.
+
+    Names are lowercase identifiers other than "reward" (the weighted total).
+    Weights are numbers from 0 to MAX_WEIGHT, and task_success must count.
+    With an answer type, components scored only for the other type are rejected.
+    """
     if value is None:
         return {"task_success": 1.0}
     if not isinstance(value, dict) or not value:
         raise ValueError("Reward weights must be a nonempty table")
     weights = {}
     for name, weight in value.items():
-        if (
-            not isinstance(name, str)
-            or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name)
-            or name == "reward"
-            or type(weight) not in (int, float)
-            or not math.isfinite(weight)
-            or weight < 0
-        ):
-            raise ValueError("Invalid reward name or weight")
+        if not isinstance(name, str) or not REWARD_NAME.fullmatch(name):
+            raise ValueError(f"Invalid reward name: {name!r}")
+        if name == "reward":
+            raise ValueError("'reward' is the weighted total, not a component")
+        # bool is a subclass of int, so compare exact types.
+        if type(weight) not in (int, float) or not 0 <= weight <= MAX_WEIGHT:
+            raise ValueError(f"Reward weight for {name} must be from 0 to {MAX_WEIGHT}")
         weights[name] = float(weight)
     if weights.get("task_success", 0) <= 0:
         raise ValueError("task_success must have positive weight")
-    try:
-        total = math.fsum(weights.values())
-    except OverflowError as error:
-        raise ValueError("Reward weights must have a finite sum") from error
-    if not math.isfinite(total):
-        raise ValueError("Reward weights must have a finite sum")
-    if answer_type is not None and set(weights) & (
-        {*METRICS, "flag_correct"} - set(answer_metrics(answer_type))
-    ):
-        raise ValueError("Reward component does not match the task's answer type")
+    if answer_type is not None:
+        other_type = {*METRICS, "flag_correct"} - set(answer_metrics(answer_type))
+        if set(weights) & other_type:
+            raise ValueError("Reward component does not match the task's answer type")
     return weights
 
 
