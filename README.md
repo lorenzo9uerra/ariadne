@@ -113,8 +113,14 @@ charge in `logs/spending.sqlite3`; keep that file between runs. Only the Ariadne
 agent goes through these controls, so do not run Harbor's built-in paid agents
 on these tasks.
 
-[`logs/pwn-01-long-runs/`](logs/pwn-01-long-runs/README.md) holds two complete
-trajectories from long, unscored pwn-01 attempts.
+Two long pwn-01 attempts, with 7,200 seconds, 240 turns and 240 tool calls
+instead of the protocol's limits, are public on Harbor Hub:
+[Mistral Large 4](https://hub.harborframework.com/jobs/5a0efd58-917f-4043-a8f6-eb8b9067f798)
+and [MiMo v2.6 Pro](https://hub.harborframework.com/jobs/b0cfd841-d296-4a79-b5a9-72193aa16219).
+Neither solved the task, and both ended when the conversation filled the
+model's 1M-token context window, after 6,458 and 5,668 seconds. They are not
+scored, and they ran on different framework versions (MiMo without web tools).
+Each trajectory carries the canary string below.
 
 ## Documentation
 
