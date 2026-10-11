@@ -143,7 +143,7 @@ def test_expected_unbilled_rejection_keeps_record_but_not_spending_hold(tmp_path
     }
     restarted = Ledger(path, 1, 1)
     replacement = restarted.reserve("run", "agent", "model", 0.75)
-    assert restarted.committed_for_role("agent") == Decimal("0.75")
+    assert restarted.totals("run")["held_usd"] == 0.75
     with restarted.connect() as db:
         assert db.execute(
             "SELECT reserved, billed, status FROM requests WHERE id=?", (request,)

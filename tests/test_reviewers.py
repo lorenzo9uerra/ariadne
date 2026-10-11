@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from decimal import Decimal
 
 import httpx
 import pytest
@@ -283,7 +282,7 @@ def test_live_review_sends_the_compared_request_and_delivers_allowed_text(tmp_pa
     ]
     assert bodies[0]["provider"]["order"] == ["deepinfra/fp8"]
     assert session.counters.monitor_tokens == 2 * 920
-    assert ledger.committed_for_role("monitor") > 0
+    assert ledger.totals()["billed_usd"] > 0
     decision = next(i for i in session.audit.items if i["stage"] == "response")
     assert decision["monitor_details"]["reviewer"] == "deepseek-flash"
 
@@ -347,7 +346,7 @@ def test_tavily_search_is_basic_and_billed_by_credit(tmp_path):
     assert body["search_depth"] == "basic" and body["max_results"] == 5
     assert not body["include_raw_content"] and not body["include_answer"]
     assert seen[0].headers["authorization"] == "Bearer tvly-test"
-    assert ledger.committed_for_role("search") == Decimal("0.008")
+    assert ledger.totals()["billed_usd"] == 0.008
     assert ledger.totals()["held_usd"] == 0
 
 

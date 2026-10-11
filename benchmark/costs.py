@@ -166,17 +166,6 @@ class Ledger:
         if billed > row[0]:
             raise CostAccountingError("Reported charge exceeded its reservation")
 
-    def committed_for_role(self, role: str) -> Decimal:
-        """Billed plus held dollars for one role, for ceilings within the cap."""
-        with self.connect() as db:
-            committed = db.execute(
-                "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
-                "'expected_unbilled' THEN 0 ELSE reserved END)), 0) FROM requests "
-                "WHERE role=?",
-                (role,),
-            ).fetchone()[0]
-        return Decimal(committed) / 1_000_000
-
     def totals(self, run_id: str | None = None) -> dict:
         query = (
             "SELECT COALESCE(SUM(billed), 0), "
