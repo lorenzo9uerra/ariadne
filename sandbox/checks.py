@@ -1,10 +1,11 @@
-"""Framework-independent inspection of Docker isolation controls."""
+"""Whether a sandbox's containers and network are isolated, and its service ready."""
 
 import asyncio
 import json
 import shlex
 import subprocess
 import time
+from dataclasses import dataclass
 
 from sandbox.container import script
 
@@ -58,92 +59,155 @@ def inspect_docker(kind: str, identifier: str) -> dict:
     )[0]
 
 
+@dataclass(frozen=True)
+class Controls:
+    """A container's isolation settings, as the checks read them."""
+
+    # Identity and privileges
+    user: str
+    privileged: bool
+    capabilities_dropped: list[str]
+    capabilities_added: list[str]
+    no_new_privileges: bool
+    custom_seccomp: bool
+    # Namespace modes for pid, ipc and userns. "" or "private" means its own.
+    namespaces: dict[str, str]
+    has_devices: bool
+    hostname: str
+
+    # Filesystem
+    read_only_root: bool
+    bind_mounts: list[str]
+    tmpfs: dict[str, int | None]  # Mount point -> size in bytes, if declared.
+    mounts: list[tuple[str, str]]  # (type, mount point) for every mount.
+
+    # Network
+    network: str  # "none", "host", "bridge", or the network the container joins
+    has_published_ports: bool
+    extra_hosts: list[str]
+    dns: list[str]
+    sysctls: dict[str, str]
+
+    # Resources
+    memory_bytes: int
+    memory_and_swap_bytes: int
+    cpu_nanos: int  # Billionths of a CPU.
+    pids_limit: int | None
+
+
+EPHEMERAL_MOUNTS = {"/workspace", "/tmp"}
+
+
+def tmpfs_size(options: str) -> int | None:
+    """The size in bytes from tmpfs options such as "rw,size=65536"."""
+    for option in options.split(","):
+        if option.startswith("size=") and option[5:].isdigit():
+            return int(option[5:])
+    return None
+
+
+def docker_controls(details: dict) -> Controls:
+    """Read a container's controls from `docker inspect` output."""
+    host, config = details["HostConfig"], details["Config"]
+    security_options = host["SecurityOpt"] or []
+    return Controls(
+        user=config["User"],
+        privileged=host["Privileged"],
+        capabilities_dropped=host["CapDrop"] or [],
+        capabilities_added=host["CapAdd"] or [],
+        no_new_privileges=any(
+            option in ("no-new-privileges", "no-new-privileges:true")
+            for option in security_options
+        ),
+        custom_seccomp=any(
+            option.startswith("seccomp=") for option in security_options
+        ),
+        namespaces={
+            field: host.get(field) or ""
+            for field in ("PidMode", "IpcMode", "UsernsMode")
+        },
+        has_devices=any(
+            host.get(field)
+            for field in ("Devices", "DeviceRequests", "DeviceCgroupRules")
+        ),
+        hostname=config["Hostname"],
+        read_only_root=host["ReadonlyRootfs"],
+        bind_mounts=host["Binds"] or [],
+        tmpfs={path: tmpfs_size(options) for path, options in host["Tmpfs"].items()},
+        mounts=[(mount["Type"], mount["Destination"]) for mount in details["Mounts"]],
+        network=host["NetworkMode"],
+        has_published_ports=bool(
+            host["PortBindings"] or details["NetworkSettings"]["Ports"]
+        ),
+        extra_hosts=host.get("ExtraHosts") or [],
+        dns=host.get("Dns") or [],
+        sysctls=host.get("Sysctls") or {},
+        memory_bytes=host["Memory"],
+        memory_and_swap_bytes=host["MemorySwap"],
+        cpu_nanos=host["NanoCpus"],
+        pids_limit=host["PidsLimit"],
+    )
+
+
 def container_checks(
-    details: dict,
+    controls: Controls,
     expected_limits: dict | None,
     hostname: str = "workspace",
     networked: bool = False,
 ) -> dict:
-    host, config = details["HostConfig"], details["Config"]
+    """Whether a container's controls match the sandbox policy, check by check."""
     checks = {
-        "network_mode_verified" if networked else "network_disabled": host[
-            "NetworkMode"
-        ]
-        == "none"
-        if not networked
-        else host["NetworkMode"] not in ("none", "host", "bridge"),
-        "root_filesystem_read_only": host["ReadonlyRootfs"],
-        "unprivileged": not host["Privileged"],
-        "fixed_nonroot_user": config["User"] == "1000:1000",
-        "all_capabilities_dropped": host["CapDrop"] == ["ALL"] and not host["CapAdd"],
-        "no_new_privileges": any(
-            option in ("no-new-privileges", "no-new-privileges:true")
-            for option in host["SecurityOpt"] or []
+        "fixed_nonroot_user": controls.user == "1000:1000",
+        "unprivileged": not controls.privileged,
+        "all_capabilities_dropped": controls.capabilities_dropped == ["ALL"]
+        and not controls.capabilities_added,
+        "no_new_privileges": controls.no_new_privileges,
+        "no_host_namespaces": "host" not in controls.namespaces.values(),
+        "root_filesystem_read_only": controls.read_only_root,
+        "only_ephemeral_mounts": not controls.bind_mounts
+        and set(controls.tmpfs) == EPHEMERAL_MOUNTS
+        and all(
+            kind == "tmpfs" and path in EPHEMERAL_MOUNTS
+            for kind, path in controls.mounts
         ),
-        "no_host_namespaces": all(
-            host.get(field) != "host" for field in ("PidMode", "IpcMode", "UsernsMode")
-        ),
-        "only_ephemeral_mounts": (
-            not host["Binds"]
-            and set(host["Tmpfs"]) == {"/workspace", "/tmp"}
-            and all(mount["Type"] == "tmpfs" for mount in details["Mounts"])
-            and all(
-                mount["Destination"] in {"/workspace", "/tmp"}
-                for mount in details["Mounts"]
-            )
-        ),
-        "no_published_ports": not host["PortBindings"]
-        and not details["NetworkSettings"]["Ports"],
-        "memory_bounded_without_extra_swap": host["Memory"] > 0
-        and host["MemorySwap"] == host["Memory"],
-        "cpu_bounded": host["NanoCpus"] > 0,
-        "processes_bounded": host["PidsLimit"] is not None and host["PidsLimit"] > 0,
+        "no_published_ports": not controls.has_published_ports,
+        "memory_bounded_without_extra_swap": controls.memory_bytes > 0
+        and controls.memory_and_swap_bytes == controls.memory_bytes,
+        "cpu_bounded": controls.cpu_nanos > 0,
+        "processes_bounded": controls.pids_limit is not None
+        and controls.pids_limit > 0,
     }
     if expected_limits is not None:
-
-        def mount_size(destination):
-            options = host["Tmpfs"].get(destination, "").split(",")
-            return next(
-                (
-                    int(option.removeprefix("size="))
-                    for option in options
-                    if option.startswith("size=") and option[5:].isdigit()
-                ),
-                None,
+        checks.update(
+            configured_memory=controls.memory_bytes == expected_limits["memory_bytes"],
+            configured_cpu=controls.cpu_nanos
+            == int(expected_limits["cpus"] * 1_000_000_000),
+            configured_processes=controls.pids_limit == expected_limits["pids"],
+            configured_workspace=controls.tmpfs.get("/workspace")
+            == expected_limits["workspace_bytes"],
+            configured_temp=controls.tmpfs.get("/tmp") == expected_limits["temp_bytes"],
+            neutral_hostname=controls.hostname == hostname,
+        )
+    if not networked:
+        checks["network_disabled"] = controls.network == "none"
+        return checks
+    checks.update(
+        # A named private network, never the default bridge or the host's.
+        network_mode_verified=controls.network not in ("none", "host", "bridge"),
+        separate_namespaces=all(
+            mode in ("", "private") for mode in controls.namespaces.values()
+        ),
+        no_added_devices=not controls.has_devices,
+        no_host_aliases=not controls.extra_hosts,
+        external_dns_disabled=controls.dns == ["127.0.0.1"],
+        ipv6_disabled=all(
+            controls.sysctls.get(name) == "1"
+            for name in (
+                "net.ipv6.conf.all.disable_ipv6",
+                "net.ipv6.conf.default.disable_ipv6",
             )
-
-        checks.update(
-            {
-                "configured_memory": host["Memory"] == expected_limits["memory_bytes"],
-                "configured_cpu": host["NanoCpus"]
-                == int(expected_limits["cpus"] * 1_000_000_000),
-                "configured_processes": host["PidsLimit"] == expected_limits["pids"],
-                "configured_workspace": mount_size("/workspace")
-                == expected_limits["workspace_bytes"],
-                "configured_temp": mount_size("/tmp") == expected_limits["temp_bytes"],
-                "neutral_hostname": config["Hostname"] == hostname,
-            }
-        )
-    if networked:
-        checks.update(
-            separate_namespaces=all(
-                host.get(field) in (None, "", "private")
-                for field in ("PidMode", "IpcMode", "UsernsMode")
-            ),
-            no_added_devices=not any(
-                host.get(field)
-                for field in ("Devices", "DeviceRequests", "DeviceCgroupRules")
-            ),
-            no_host_aliases=not host.get("ExtraHosts"),
-            external_dns_disabled=host.get("Dns") == ["127.0.0.1"],
-            ipv6_disabled=all(
-                host.get("Sysctls", {}).get(name) == "1"
-                for name in (
-                    "net.ipv6.conf.all.disable_ipv6",
-                    "net.ipv6.conf.default.disable_ipv6",
-                )
-            ),
-        )
+        ),
+    )
     return checks
 
 

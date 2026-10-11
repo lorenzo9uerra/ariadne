@@ -11,6 +11,7 @@ import json
 import os
 import shlex
 import tomllib
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -29,6 +30,7 @@ from sandbox.checks import (
     NETWORK_PROBES,
     PROBES,
     container_checks,
+    docker_controls,
     inspect_docker,
     network_checks,
     wait_for_service,
@@ -360,27 +362,24 @@ class AriadneDockerEnvironment(DockerEnvironment):
         """Inspect the running containers and run denial probes inside them."""
         self.container_id, details = await self._container("main")
         limits = json.loads((self.environment_dir / "limits.json").read_text())
-        # Apply the shared control checks, adapting only the additional /logs
-        # tmpfs. Check its real configuration before removing it from the view.
-        logs = details["HostConfig"]["Tmpfs"].get("/logs", "")
+        controls = docker_controls(details)
+        # Harbor adds a /logs tmpfs that the shared policy does not list. Check
+        # its size here, then leave it out of the shared mount checks.
         checks = {
-            "ephemeral_logs": f"size={LOG_BYTES}" in logs.split(",")
+            "ephemeral_logs": controls.tmpfs.get("/logs") == LOG_BYTES
             and all(
-                mount["Type"] == "tmpfs"
-                for mount in details["Mounts"]
-                if mount["Destination"] == "/logs"
+                kind == "tmpfs" for kind, path in controls.mounts if path == "/logs"
             ),
         }
-        controls = json.loads(json.dumps(details))
-        controls["HostConfig"]["Tmpfs"].pop("/logs", None)
-        controls["Mounts"] = [
-            mount for mount in controls["Mounts"] if mount["Destination"] != "/logs"
-        ]
-        checks.update(container_checks(controls, limits, networked=self._service_task))
-        checks["default_seccomp"] = not any(
-            option.startswith("seccomp=")
-            for option in details["HostConfig"]["SecurityOpt"] or []
+        shared = replace(
+            controls,
+            tmpfs={
+                path: size for path, size in controls.tmpfs.items() if path != "/logs"
+            },
+            mounts=[(kind, path) for kind, path in controls.mounts if path != "/logs"],
         )
+        checks.update(container_checks(shared, limits, networked=self._service_task))
+        checks["default_seccomp"] = not controls.custom_seccomp
         network = "challenge" if self._service_task else "none"
         checks["denial_probes"] = await self._probes("main", network)
         if self._service_task:
@@ -393,7 +392,7 @@ class AriadneDockerEnvironment(DockerEnvironment):
         checks = {
             f"target_{name}": value
             for name, value in container_checks(
-                target_details,
+                docker_controls(target_details),
                 limits["target_limits"],
                 hostname="target",
                 networked=True,
