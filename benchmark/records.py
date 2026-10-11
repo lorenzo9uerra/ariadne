@@ -14,6 +14,8 @@ from uuid import uuid4
 
 from benchmark.tasks import ROOT
 
+# Review outcomes for an attempt. Counted attempts are scored; the excluded
+# ones (failures outside the agent's control) may be rerun in their slot.
 DISPOSITIONS = {
     "counted",
     "external_failure",
@@ -39,6 +41,7 @@ ORDINARY = {
 
 
 def digest(path: Path) -> str:
+    """A file's sha256."""
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
 
@@ -55,7 +58,11 @@ def tree_digest(root: Path) -> str:
 
 
 def fingerprint(tasks: list[dict]) -> dict:
-    """Behavioral inputs must remain fixed; implementation fixes are recorded separately."""
+    """Hashes of everything that defines an experiment's behaviour.
+
+    Settings, dependencies, the job template, the prompts and each task's
+    folder. The plan freezes them; any change requires a new experiment.
+    """
     files = [
         ROOT / "benchmark/draft.toml",
         ROOT / "config.toml",
@@ -75,6 +82,11 @@ def fingerprint(tasks: list[dict]) -> dict:
 
 
 def implementation() -> dict:
+    """Hashes of the harness code in benchmark/ and sandbox/.
+
+    Unlike the inputs, this may change within an experiment, but only through a
+    reviewed fix that the journal records.
+    """
     files = sorted((ROOT / "benchmark").glob("*.py"))
     files.extend(sorted((ROOT / "sandbox").rglob("*.py")))
     files.extend(
@@ -90,6 +102,7 @@ def implementation() -> dict:
 
 
 def write_json(path: Path, value: dict) -> None:
+    """Write through a temporary file, so readers never see a partial file."""
     temporary = path.with_name(f".{path.name}-{uuid4().hex}.tmp")
     temporary.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
     temporary.replace(path)
@@ -97,6 +110,7 @@ def write_json(path: Path, value: dict) -> None:
 
 @contextmanager
 def journal(folder: Path):
+    """Lock the event journal; yield its events and a function that appends one."""
     path = folder / "private/events.jsonl"
     with path.open("a+", encoding="utf-8") as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
@@ -121,6 +135,11 @@ def journal(folder: Path):
 
 
 def read_plan(folder: Path) -> dict:
+    """The frozen plan, with any configuration updates from the journal applied.
+
+    No current command writes configuration updates; they come from the former
+    continuation script, and older experiments still need them applied.
+    """
     path = folder / "private/plan.json"
     plan = json.loads(path.read_text())
     if plan.get("version") != 4:
@@ -139,6 +158,7 @@ def read_plan(folder: Path) -> dict:
 
 
 def verify_inputs(plan: dict) -> None:
+    """Stop if any frozen input has changed since the plan was written."""
     if fingerprint(plan["jobs"]) != plan["inputs"]:
         raise ValueError(
             "Frozen task, prompt, dependency or configuration inputs changed; start a new experiment"
@@ -146,6 +166,10 @@ def verify_inputs(plan: dict) -> None:
 
 
 def retry_interruption(row):
+    """Whether an attempt ran out of time while waiting to retry an API request.
+
+    That ending is the provider's failure, not the agent's, so it needs review.
+    """
     if row.get("stop_reason") != "elapsed_seconds" or not row.get("path"):
         return False
     audit = Path(row["path"]).parent / "private/audit.jsonl"

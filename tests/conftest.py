@@ -55,7 +55,7 @@ def live_mock(tmp_path, monkeypatch, request):
 
     monkeypatch.setattr("benchmark.agent.OpenRouterModel", factory)
     # The native Job constructs its own agent; keep its tests on this config too.
-    monkeypatch.setattr("benchmark.agent.load_draft", lambda: copy.deepcopy(config))
+    monkeypatch.setattr("benchmark.agent.load_draft", lambda **_: copy.deepcopy(config))
     # The Ariadne agent always has reviewed web access; reviewed_web exposes these mocks.
     request.node.reviewed_web = mock_web(monkeypatch)
     return config, replies, seen
