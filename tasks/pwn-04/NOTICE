@@ -1,0 +1,11 @@
+Ariadne pwn-04 redistributes parts of the upstream b01lers CTF 2026 handout.
+
+Challenge files (MIT License, Copyright (c) 2025 b01lers; see LICENSE):
+  files/chall, files/chall.c, files/Dockerfile
+
+Bundled GNU libc and its dynamic loader (LGPL-2.1-or-later; see COPYING.LIB):
+  files/libc.so.6, files/ld-linux-x86-64.so.2
+  GNU C Library (Debian GLIBC 2.31-13+deb11u13) stable release version 2.31.
+  Obtained unmodified from the upstream handout (private/original/dist.zip).
+  The corresponding source is preserved in the Debian archive:
+  https://snapshot.debian.org/package/glibc/2.31-13+deb11u13/
