@@ -268,10 +268,73 @@ def test_allowed_search_snippet_is_available_to_later_fetch_approver():
     }
 
 
-def test_malformed_arguments_still_count():
-    s, backend = session(), FakeBackend()
-    dispatch(s, backend, arguments={"invalid_parameter": True})
-    assert s.counters.proposed == s.counters.web == 1 and not backend.gets
+@pytest.mark.parametrize(
+    "name,field",
+    [
+        ("bash", "command"),
+        ("submit", "answer"),
+        ("web_search", "query"),
+        ("web_fetch", "url"),
+    ],
+)
+def test_invalid_arguments_count_without_execution_or_review(name, field):
+    executed = []
+
+    async def tool(**arguments):
+        executed.append(arguments)
+        return "unexpected execution"
+
+    for arguments in ({}, {field: None}, {field: "supplied", "timeout": 60}):
+        s = session()
+        result = run_calls(s, [call("invalid", name, arguments)], {name: tool})[0]
+        assert result["error"]["type"] == "invalid_arguments"
+        assert field in result["error"]["message"]
+        assert not executed and not s.monitor.payloads
+        assert s.counters.proposed == 1
+        assert s.counters.non_submit == (name != "submit")
+        assert s.counters.web == (name in {"web_search", "web_fetch"})
+
+
+def test_unsupported_argument_feedback_allows_a_corrected_call():
+    s = session()
+    executed = []
+
+    async def bash(command):
+        executed.append(command)
+        return json.dumps(
+            {"exit_code": 126, "stdout": "", "stderr": "Permission denied"}
+        )
+
+    results = run_calls(
+        s,
+        [
+            call("invalid", "bash", '{"command":"synthetic","timeout":60}'),
+            call("corrected", "bash", {"command": "synthetic"}),
+        ],
+        {"bash": bash},
+    )
+    assert results[0]["error"] == {
+        "type": "invalid_arguments",
+        "message": "bash requires exactly one string argument: command",
+    }
+    assert executed == ["synthetic"] and s.counters.non_submit == 2
+    assert results[1]["error"] is None
+    assert json.loads(results[1]["text"])["exit_code"] == 126
+    assert not any(item["stage"] == "tool_error" for item in s.audit.items)
+
+
+def test_internal_type_error_is_not_reported_as_invalid_arguments():
+    s = session()
+
+    async def bash(command):
+        raise TypeError("Synthetic private backend detail")
+
+    result = run_calls(
+        s, [call("valid", "bash", {"command": "synthetic"})], {"bash": bash}
+    )[0]
+    assert result["error"] == {"type": "execution", "message": "Tool execution failed"}
+    assert any(item.get("error_type") == "TypeError" for item in s.audit.items)
+    assert "private backend" not in json.dumps(result)
 
 
 def test_submissions_are_audited_but_excluded_from_tool_budget():
@@ -347,7 +410,8 @@ def test_syntactic_parse_error_is_counted_before_argument_parsing():
     s, backend = session(), FakeBackend()
     proposal = call("bad-json", "web_fetch", {}, parse_error="Invalid JSON")
     result = run_calls(s, [proposal], web_tools(s, backend))[0]
-    assert result["error"] and s.counters.proposed == s.counters.web == 1
+    assert result["error"]["type"] == "invalid_arguments"
+    assert s.counters.proposed == s.counters.web == 1
     assert not backend.gets and not s.monitor.payloads
 
 
@@ -458,6 +522,8 @@ def test_first_submission_ends_batch_even_when_invalid(malformed):
     assert results[1]["error"] is not None
     assert s.counters.non_submit == 1
     assert s.submission == (None if malformed else "supplied")
+    if malformed:
+        assert results[0]["error"]["type"] == "invalid_arguments"
 
 
 def test_unknown_and_malformed_proposals_count_before_execution():
