@@ -93,22 +93,18 @@ def review(
 async def autoreview_experiment(folder: Path, *, retry_failed=False) -> None:
     """Paid: triage and labelling calls are charged to the shared ledger."""
     import os
-    import tomllib
 
     from dotenv import load_dotenv
 
     from benchmark import autoreview
-    from benchmark.costs import Ledger
+    from benchmark.costs import SPEND_LEDGER, Ledger
 
     load_dotenv(ROOT / ".env", override=False)
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise SystemExit("Set OPENROUTER_API_KEY in .env")
-    harness = tomllib.loads((ROOT / "config.toml").read_text())
     settings = read_plan(folder)["settings"]
-    ledger = Ledger(
-        ROOT / harness["spend_ledger"], settings["spending"].get("limit_usd")
-    )
+    ledger = Ledger(ROOT / SPEND_LEDGER, settings["spending"].get("limit_usd"))
     records = await autoreview.run(folder, key, ledger, retry_failed=retry_failed)
     flagged = report(folder)["automatic_review"]["flagged_for_human"]
     print(

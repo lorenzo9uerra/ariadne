@@ -65,7 +65,6 @@ def fingerprint(tasks: list[dict]) -> dict:
     """
     files = [
         ROOT / "benchmark/draft.toml",
-        ROOT / "config.toml",
         ROOT / "uv.lock",
         ROOT / "pyproject.toml",
         ROOT / "job.yaml",

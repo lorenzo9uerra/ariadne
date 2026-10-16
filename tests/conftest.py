@@ -29,7 +29,6 @@ def pytest_sessionstart(session):
 def live_mock(tmp_path, monkeypatch, request):
     root = tmp_path / "harness"
     root.mkdir()
-    (root / "config.toml").write_text('spend_ledger = "spending.sqlite3"\n')
     monkeypatch.setattr("benchmark.agent.ROOT", root)
     monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-key")
     monkeypatch.setattr(

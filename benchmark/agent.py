@@ -6,7 +6,6 @@ import json
 import os
 import shlex
 import time
-import tomllib
 from importlib.metadata import version as package_version
 from pathlib import Path
 from string import Template
@@ -23,6 +22,7 @@ from harbor.models.trajectories.observation_result import ObservationResult
 from benchmark.audit import AuditTrail
 from benchmark.budgets import AttemptClock, load_draft
 from benchmark.costs import (
+    SPEND_LEDGER,
     AttemptSpendingLimit,
     CostAccountingError,
     Ledger,
@@ -230,9 +230,8 @@ class AriadneAgent(BaseAgent):
             raise ValueError("The Ariadne agent requires its verified environment")
         environment.require_submission_tool()
         load_dotenv(ROOT / ".env", override=False)
-        harness = tomllib.loads((ROOT / "config.toml").read_text())
         ledger = Ledger(
-            ROOT / harness["spend_ledger"],
+            ROOT / SPEND_LEDGER,
             self.config["spending"].get("limit_usd"),
             self.config["spending"].get("attempt_limit_usd"),
         )

@@ -45,7 +45,7 @@ def harness(tmp_path, monkeypatch):
     root = tmp_path / "harness"
     (root / "benchmark/prompts").mkdir(parents=True)
     (root / "sandbox").mkdir()
-    for name in ("config.toml", "uv.lock", "pyproject.toml", "benchmark/draft.toml"):
+    for name in ("uv.lock", "pyproject.toml", "benchmark/draft.toml"):
         (root / name).write_text("Frozen synthetic input.\n")
     for name in ("job.yaml", "job.dev.yaml"):
         shutil.copyfile(ROOT / name, root / name)

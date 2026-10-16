@@ -49,6 +49,11 @@ def microdollars(value: object) -> int:
     return int((amount(value) * MICRODOLLARS).to_integral_value(ROUND_CEILING))
 
 
+# The shared spending ledger, relative to the repository root. Keep it between
+# runs: it holds every reservation and charge across experiments.
+SPEND_LEDGER = Path("logs/spending.sqlite3")
+
+
 class Ledger:
     """Track charges and reservations, enforcing any configured local ceilings.
 
