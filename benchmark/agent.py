@@ -340,13 +340,9 @@ class AgentAttempt:
             agent.config,
             agent.monitor,
             agent.review_context,
-            str(agent.context_id),
-            str(agent.session_id),
-            audit_path=self.audit.path,
+            self.audit,
             secrets=agent.secrets,
         )
-        # Share one ordered audit stream for requests, proposals and results.
-        self.session.audit = self.audit
         system = render_prompt(self.limits)
         self.schemas = TOOLS + WEB_TOOLS
         self.messages = [

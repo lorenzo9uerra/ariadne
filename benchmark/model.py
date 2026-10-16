@@ -188,6 +188,7 @@ class OpenRouterModel:
         )
 
     async def check_route(self) -> None:
+        """Check the route by performing a preflight request to ensure the model is ready."""
         self.prices = await asyncio.to_thread(preflight, self.config, self.api_key)
         self.ready = True
 

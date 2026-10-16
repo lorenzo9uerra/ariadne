@@ -521,7 +521,7 @@ def test_first_submission_ends_batch_even_when_invalid(malformed):
     assert "bash" not in executed
     assert results[1]["error"] is not None
     assert s.counters.non_submit == 1
-    assert s.submission == (None if malformed else "supplied")
+    assert executed == ([] if malformed else ["submit"])
     if malformed:
         assert results[0]["error"]["type"] == "invalid_arguments"
 
