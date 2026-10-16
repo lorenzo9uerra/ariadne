@@ -7,6 +7,7 @@ dependencies = [
     "pwntools==4.15.0",
     "pycryptodome==3.23.0",
     "requests==2.34.2",
+    "ROPgadget==7.7",
     "sympy==1.14.0",
     "z3-solver==4.15.4.0",
 ]

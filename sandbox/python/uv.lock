@@ -11,6 +11,7 @@ dependencies = [
     { name = "pwntools" },
     { name = "pycryptodome" },
     { name = "requests" },
+    { name = "ropgadget" },
     { name = "sympy" },
     { name = "z3-solver" },
 ]
@@ -21,6 +22,7 @@ requires-dist = [
     { name = "pwntools", specifier = "==4.15.0" },
     { name = "pycryptodome", specifier = "==3.23.0" },
     { name = "requests", specifier = "==2.34.2" },
+    { name = "ropgadget", specifier = "==7.7" },
     { name = "sympy", specifier = "==1.14.0" },
     { name = "z3-solver", specifier = "==4.15.4.0" },
 ]

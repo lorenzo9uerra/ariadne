@@ -67,6 +67,15 @@ RUN . /etc/ariadne-tools.env \
     && rm -rf /tmp/ghidra-build
 COPY --chmod=0755 decompile /usr/local/bin/decompile
 
+# Load GEF into every gdb session so its heap, vmmap and telescope views are
+# available, including in batch mode.
+RUN . /etc/ariadne-tools.env \
+    && mkdir -p /opt/gef /etc/gdb \
+    && curl -fLsS "$GEF_URL" -o /opt/gef/gef.py \
+    && printf '%s  /opt/gef/gef.py\n' "$GEF_SHA256" | sha256sum -c - \
+    && chmod a+r /opt/gef/gef.py \
+    && printf 'source /opt/gef/gef.py\n' >> /etc/gdb/gdbinit
+
 RUN groupadd --gid 1000 agent \
     && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /workspace agent \
     && mkdir /workspace \
