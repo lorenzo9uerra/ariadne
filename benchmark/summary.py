@@ -41,7 +41,7 @@ ORDINARY = {
     "agent_turns",
     "total_tool_calls",
     "context_limit",
-    "monitor_budget",
+    "reviewer_budget",
 }
 
 

@@ -126,7 +126,7 @@ def test_deadline_keeps_the_hold(tmp_path):
     async def slow(n):
         await asyncio.get_running_loop().create_future()  # never answers
 
-    candidate = reviewer(monitor_timeout_seconds=0.05)
+    candidate = reviewer(reviewer_timeout_seconds=0.05)
     result, _, ledger = run(candidate, slow, tmp_path)
     assert result.status == "timeout"
     assert ledger.totals()["held_usd"] > 0
@@ -134,7 +134,7 @@ def test_deadline_keeps_the_hold(tmp_path):
 
 def test_oversized_request_is_rejected_before_reserving(tmp_path):
     result, requests, ledger = run(
-        reviewer(monitor_max_input_tokens=50), lambda n: chat_reply(GOOD), tmp_path
+        reviewer(reviewer_max_input_tokens=50), lambda n: chat_reply(GOOD), tmp_path
     )
     assert result.status == "oversized" and not requests
     assert ledger.totals()["held_usd"] == 0
@@ -175,15 +175,15 @@ def live_fetch(
         bodies.append(json.loads(request.content))
         return handler(len(bodies))
 
-    monitor = web_review.live_monitor(
+    reviewer = web_review.model_reviewer(
         config, ledger, "test-key", "run-1", httpx.MockTransport(recorded)
     )
-    session = Session(config, monitor, context, AuditTrail("run-1", "sample-1"))
+    session = Session(config, reviewer, context, AuditTrail("run-1", "sample-1"))
     backend = Backend(text)
     proposal = call("c1", "web_fetch", {"url": CANDIDATE["url"]})
 
     async def go():
-        await monitor.check_route(1)
+        await reviewer.check_route(1)
         return await execute_benchmark_tools(
             [proposal], web_tools(session, backend), session
         )
@@ -195,21 +195,21 @@ def live_fetch(
     return result, session, bodies, ledger, backend
 
 
-def test_live_monitor_is_the_configured_reviewer(tmp_path):
-    assert load_draft()["models"]["monitor"] == "deepseek-flash"
+def test_model_reviewer_is_the_configured_reviewer(tmp_path):
+    assert load_draft()["models"]["web_reviewer"] == "deepseek-flash"
     ledger = Ledger(tmp_path / "ledger.sqlite3", "10")
-    monitor = web_review.live_monitor(load_draft(), ledger, "k", "r")
-    assert monitor.reviewer.settings["model"] == "deepseek/deepseek-v4.1-flash"
+    reviewer = web_review.model_reviewer(load_draft(), ledger, "k", "r")
+    assert reviewer.model.settings["model"] == "deepseek/deepseek-v4.1-flash"
 
 
 def test_live_reviewer_requires_preflight(tmp_path):
     from benchmark.costs import CostAccountingError
 
-    monitor = web_review.live_monitor(
+    reviewer = web_review.model_reviewer(
         load_draft(), Ledger(tmp_path / "ledger", 10), "test-key", "run"
     )
     with pytest.raises(CostAccountingError, match="preflight"):
-        asyncio.run(monitor({"reviewer_context": CONTEXT}, 512, 675840))
+        asyncio.run(reviewer({"reviewer_context": CONTEXT}, 512, 675840))
 
 
 @pytest.mark.parametrize(
@@ -231,12 +231,12 @@ def test_changed_live_reviewer_metadata_blocks_route(tmp_path, monkeypatch, chan
     else:
         endpoint["tag"] = "other"
     monkeypatch.setattr(review_model, "read_json", lambda *args: data)
-    monitor = web_review.live_monitor(
+    reviewer = web_review.model_reviewer(
         load_draft(), Ledger(tmp_path / "ledger", 10), "test-key", "run"
     )
     with pytest.raises(CostAccountingError):
-        asyncio.run(monitor.check_route(1))
-    assert monitor.billing_provider is None
+        asyncio.run(reviewer.check_route(1))
+    assert reviewer.billing_provider is None
 
 
 @pytest.mark.parametrize("change", ["cost", "provider", "byok", "usage", "oversized"])
@@ -282,10 +282,10 @@ def test_live_review_sends_the_compared_request_and_delivers_allowed_text(tmp_pa
         ),
     ]
     assert bodies[0]["provider"]["order"] == ["deepinfra/fp8"]
-    assert session.counters.monitor_tokens == 2 * 920
+    assert session.counters.reviewer_tokens == 2 * 920
     assert ledger.totals()["billed_usd"] > 0
     decision = next(i for i in session.audit.items if i["stage"] == "response")
-    assert decision["monitor_details"]["reviewer"] == "deepseek-flash"
+    assert decision["reviewer_details"]["reviewer"] == "deepseek-flash"
 
 
 def test_live_forbidden_response_is_withheld(tmp_path):
@@ -319,7 +319,7 @@ def test_live_oversized_context_is_never_sent(tmp_path):
 
 
 def backend(tmp_path, handler, limits=None):
-    from benchmark.web import LiveBackend
+    from benchmark.web import NetworkBackend
 
     config = load_draft()["web"] | (limits or {})
     ledger = Ledger(tmp_path / "ledger.sqlite3", "10")
@@ -329,7 +329,7 @@ def backend(tmp_path, handler, limits=None):
         seen.append(request)
         return handler(request)
 
-    live = LiveBackend(
+    live = NetworkBackend(
         "tvly-test", ledger, "run-1", config, httpx.MockTransport(recorded)
     )
     return live, seen, ledger

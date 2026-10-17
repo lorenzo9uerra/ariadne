@@ -71,14 +71,14 @@ def mock_web(monkeypatch):
 
     monkeypatch.setenv("TAVILY_API_KEY", "synthetic-search-key")
     monkeypatch.setattr(review_model, "read_json", lambda *args: endpoint_data())
-    original = web_review.live_monitor
+    original = web_review.model_reviewer
     decisions, seen = [], []
 
     def reply(request):
         seen.append(json.loads(request.content))
         return decisions.pop(0) if decisions else chat_reply(GOOD)
 
-    def monitor(config, ledger, key, run_id):
+    def reviewer(config, ledger, key, run_id):
         return original(config, ledger, key, run_id, httpx.MockTransport(reply))
 
     class Backend:
@@ -104,6 +104,8 @@ def mock_web(monkeypatch):
             return HTTPReply(200, self.text.encode())
 
     backend = Backend()
-    monkeypatch.setattr("benchmark.agent.live_monitor", monitor)
-    monkeypatch.setattr("benchmark.agent.LiveBackend", lambda *args, **kwargs: backend)
+    monkeypatch.setattr("benchmark.agent.model_reviewer", reviewer)
+    monkeypatch.setattr(
+        "benchmark.agent.NetworkBackend", lambda *args, **kwargs: backend
+    )
     return decisions, seen, backend

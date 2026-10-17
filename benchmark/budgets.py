@@ -70,8 +70,8 @@ def apply_limits(config: dict, overrides: dict) -> None:
     zero_allowed = {
         "total_tool_calls",
         "web_calls",
-        "monitor_calls",
-        "monitor_tokens",
+        "reviewer_calls",
+        "reviewer_tokens",
         "model_retries",
         "redirects",
     }
@@ -96,20 +96,23 @@ def apply_limits(config: dict, overrides: dict) -> None:
         config[section].update(values)
 
     budgets = overrides.get("budgets", {})
-    if "web_calls" in budgets and "monitor_calls" not in budgets:
-        config["budgets"]["monitor_calls"] = 2 * budgets["web_calls"]
-    if "monitor_tokens" not in budgets and set(budgets) & {
+    if "web_calls" in budgets and "reviewer_calls" not in budgets:
+        config["budgets"]["reviewer_calls"] = 2 * budgets["web_calls"]
+    if "reviewer_tokens" not in budgets and set(budgets) & {
         "web_calls",
-        "monitor_calls",
-        "monitor_max_input_tokens",
-        "monitor_max_output_tokens",
+        "reviewer_calls",
+        "reviewer_max_input_tokens",
+        "reviewer_max_output_tokens",
     }:
         values = config["budgets"]
         # Two stages per web call; each decision allows one retry.
-        values["monitor_tokens"] = (
-            values["monitor_calls"]
+        values["reviewer_tokens"] = (
+            values["reviewer_calls"]
             * 2
-            * (values["monitor_max_input_tokens"] + values["monitor_max_output_tokens"])
+            * (
+                values["reviewer_max_input_tokens"]
+                + values["reviewer_max_output_tokens"]
+            )
         )
 
 
@@ -119,8 +122,8 @@ class Counters:
     proposed: int = 0
     non_submit: int = 0
     web: int = 0
-    monitor_calls: int = 0
-    monitor_tokens: int = 0
+    reviewer_calls: int = 0
+    reviewer_tokens: int = 0
     reservations: dict[str, str | None] = field(default_factory=dict)
 
     def reserve(self, call_id: str, name: str) -> str | None:
@@ -139,18 +142,18 @@ class Counters:
         self.reservations[call_id] = reason
         return reason
 
-    def reserve_monitor(self) -> int:
-        remaining = self.limits["monitor_tokens"] - self.monitor_tokens
-        if self.monitor_calls >= self.limits["monitor_calls"]:
-            raise BudgetExceeded("monitor_calls")
-        if remaining <= self.limits["monitor_max_output_tokens"]:
-            raise BudgetExceeded("monitor_tokens")
-        self.monitor_calls += 1
+    def reserve_reviewer(self) -> int:
+        remaining = self.limits["reviewer_tokens"] - self.reviewer_tokens
+        if self.reviewer_calls >= self.limits["reviewer_calls"]:
+            raise BudgetExceeded("reviewer_calls")
+        if remaining <= self.limits["reviewer_max_output_tokens"]:
+            raise BudgetExceeded("reviewer_tokens")
+        self.reviewer_calls += 1
         return remaining
 
-    def charge_monitor(self, tokens: int) -> None:
+    def charge_reviewer(self, tokens: int) -> None:
         if type(tokens) is not int or tokens < 0:
-            raise ValueError("Monitor must report nonnegative integer token usage")
-        self.monitor_tokens += tokens
-        if self.monitor_tokens > self.limits["monitor_tokens"]:
-            raise BudgetExceeded("monitor_tokens")
+            raise ValueError("The reviewer must report nonnegative integer token usage")
+        self.reviewer_tokens += tokens
+        if self.reviewer_tokens > self.limits["reviewer_tokens"]:
+            raise BudgetExceeded("reviewer_tokens")

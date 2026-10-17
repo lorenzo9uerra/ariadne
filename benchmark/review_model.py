@@ -45,11 +45,11 @@ class OversizedRequest(ValueError):
 
 
 def policy_parts() -> tuple[str, str]:
-    """The shared policy and the chat-only output instruction from monitor.txt."""
-    text = (PROMPTS / "monitor.txt").read_text()
+    """The shared policy and the chat-only output instruction from web_reviewer.txt."""
+    text = (PROMPTS / "web_reviewer.txt").read_text()
     shared, _, chat = text.partition("OUTPUT FOR CHAT REVIEWERS")
     if not chat:
-        raise ValueError("monitor.txt lacks its chat output section")
+        raise ValueError("web_reviewer.txt lacks its chat output section")
     return shared.strip(), chat.strip()
 
 
@@ -165,7 +165,7 @@ class Reviewer:
         """The most a request can cost: a full context window plus maximum output."""
         return (
             self.settings["context_tokens"] * amount(self.settings["input_per_million"])
-            + self.budgets["monitor_max_output_tokens"]
+            + self.budgets["reviewer_max_output_tokens"]
             * amount(self.settings["output_per_million"])
         ) / 1_000_000
 
@@ -181,7 +181,7 @@ class Reviewer:
             ],
             "temperature": 0,
             "seed": self.seed,
-            "max_tokens": self.budgets["monitor_max_output_tokens"],
+            "max_tokens": self.budgets["reviewer_max_output_tokens"],
             "response_format": self.schema or chat_schema(),
             "provider": {
                 "order": [self.settings["provider"]],
@@ -202,7 +202,7 @@ class Reviewer:
             + tokens(user_message)
             + tokens(json.dumps(body["response_format"]))
         )
-        if measured > self.budgets["monitor_max_input_tokens"]:
+        if measured > self.budgets["reviewer_max_input_tokens"]:
             raise OversizedRequest(
                 f"{measured} input tokens exceed the per-request limit"
             )
@@ -235,7 +235,7 @@ class Reviewer:
             body = self.build(user_message)
         except OversizedRequest as error:
             return ReviewResult(None, "oversized", error=str(error))
-        timeout = self.budgets["monitor_timeout_seconds"]
+        timeout = self.budgets["reviewer_timeout_seconds"]
         started = time.monotonic()
         result = ReviewResult(None, "provider_error")
         headers = {
@@ -349,7 +349,7 @@ class Reviewer:
                 return False
         # Leave at least two seconds for the retried request itself.
         elapsed = time.monotonic() - started
-        if elapsed + wait + 2 > self.budgets["monitor_timeout_seconds"]:
+        if elapsed + wait + 2 > self.budgets["reviewer_timeout_seconds"]:
             return False
         await asyncio.sleep(wait)
         return True
@@ -407,7 +407,7 @@ async def verify_route(reviewer: "Reviewer", timeout: int) -> str:
         or amount(pricing.get("request", 0)) != 0
         or endpoint["context_length"] != settings["context_tokens"]
         or endpoint["max_completion_tokens"]
-        < reviewer.budgets["monitor_max_output_tokens"]
+        < reviewer.budgets["reviewer_max_output_tokens"]
         or not required.issubset(endpoint["supported_parameters"])
         or not endpoint.get("provider_name")
     ):

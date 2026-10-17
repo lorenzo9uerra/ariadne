@@ -204,12 +204,12 @@ def test_concurrent_reservations_share_one_budget(tmp_path):
     assert ledger.totals()["held_usd"] == 0.6
 
 
-def test_agent_and_monitor_share_cap_without_refunding_faults(tmp_path):
+def test_agent_and_reviewer_share_cap_without_refunding_faults(tmp_path):
     ledger = Ledger(tmp_path / "spend.sqlite3", 1)
     request = ledger.reserve("implementation-fault", "agent", "model", "0.8")
     ledger.settle(request, "0.8", "generation")
     with pytest.raises(SpendingLimit):
-        ledger.reserve("replacement", "monitor", "model", "0.3")
+        ledger.reserve("replacement", "reviewer", "model", "0.3")
     assert ledger.totals("implementation-fault")["billed_usd"] == 0.8
 
 
@@ -363,7 +363,7 @@ def test_attempt_ceiling_applies_per_run(tmp_path):
     ledger = Ledger(tmp_path / "ledger.sqlite3", "10", "1")
     ledger.settle(ledger.reserve("a", "agent", "m", "0.6"), "0.6", None)
     with pytest.raises(AttemptSpendingLimit):
-        ledger.reserve("a", "monitor", "m", "0.5")
+        ledger.reserve("a", "reviewer", "m", "0.5")
     ledger.reserve("b", "agent", "m", "0.9")  # Another attempt is unaffected.
     assert issubclass(AttemptSpendingLimit, SpendingLimit)
 

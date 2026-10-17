@@ -1,7 +1,7 @@
 """Reviewed web access: the web_search and web_fetch tools and their transport.
 
 The tools check every URL and address, limit how much they read, and send
-requests and responses to the reviewer. LiveBackend is the live
+requests and responses to the reviewer. NetworkBackend is the live
 transport: Tavily search and a fetch pinned to the validated addresses.
 """
 
@@ -51,7 +51,7 @@ class HTTPReply:
 class Backend(Protocol):
     """What the web tools need from a search and fetch provider.
 
-    LiveBackend is the real one, and the tests use fakes without any network.
+    NetworkBackend is the real one, and the tests use fakes without any network.
     The checks in fetch_text only hold if every get() keeps these promises:
     connect only to the addresses it is given, keep the original hostname for
     TLS and the Host header, use no proxy, never follow a redirect itself, and
@@ -308,7 +308,7 @@ TAVILY_URL = "https://api.tavily.com/search"
 USER_AGENT = "Ariadne-reference-fetch/0.1 (research benchmark)"
 
 
-class LiveBackend:
+class NetworkBackend:
     def __init__(
         self,
         tavily_key: str,
