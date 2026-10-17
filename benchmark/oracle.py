@@ -53,7 +53,7 @@ def oracle_payload(task_dir: Path) -> dict[str, bytes]:
     files = {ENTRYPOINT: entry.read_bytes()}
     for line in stage.read_text().splitlines():
         if not line or line.startswith("#"):
-            raise ValueError("Oracle staging list must be explicit")
+            raise ValueError("Oracle staging list must have no blank or comment lines")
         destination, source = line.split(" ", 1)
         path = PurePosixPath(source)
         if (

@@ -453,7 +453,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
     path = folder / original["path"]
     saved = path.read_bytes()
     for reviewer, note in (("human", ""), ("autoreview-v1", "Unknown cause")):
-        with pytest.raises(ValueError, match="explicit owner decision"):
+        with pytest.raises(ValueError, match="note from the owner"):
             record_review(
                 folder,
                 original["attempt"],

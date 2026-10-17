@@ -55,7 +55,7 @@ def retry_after(value: str | None) -> float | None:
 
 
 def pre_inference_rejection(response: httpx.Response) -> bool:
-    """Recognize explicit shared-pool rejection, not an arbitrary HTTP error."""
+    """Whether an error is the provider's shared-pool rejection, sent before inference."""
     if response.status_code != 429 or len(response.content) > 16384:
         return False
     try:

@@ -1,4 +1,4 @@
-"""Harbor Docker lifecycle with ephemeral filesystems and a narrow grading boundary.
+"""Harbor Docker lifecycle with temporary filesystems and controlled file transfer.
 
 This adapter depends on Harbor 0.24.0's Docker implementation. Its internal
 extension points are covered by the real-container security tests.
@@ -671,13 +671,13 @@ class AriadneDockerEnvironment(DockerEnvironment):
         return await super().service_is_dir(path, service=service, user="1000:1000")
 
     async def service_download_file(self, source_path, target_path, *, service=None):
-        raise ValueError("Sidecar downloads are excluded from the grading boundary")
+        raise ValueError("Files cannot be downloaded from the target service")
 
     async def service_download_dir(self, source_dir, target_dir, *, service=None):
         if service in (None, "main"):
             await self.download_dir(source_dir, target_dir)
             return
-        raise ValueError("Sidecar downloads are excluded from the grading boundary")
+        raise ValueError("Files cannot be downloaded from the target service")
 
     async def download_file(self, source_path, target_path) -> None:
         target = Path(target_path)

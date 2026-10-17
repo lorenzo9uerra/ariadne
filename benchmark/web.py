@@ -1,7 +1,7 @@
 """Reviewed web access: the web_search and web_fetch tools and their transport.
 
-The tools validate every URL and address, bound what they read and pass
-requests and responses through the reviewer. LiveBackend is the live
+The tools check every URL and address, limit how much they read, and send
+requests and responses to the reviewer. LiveBackend is the live
 transport: Tavily search and a fetch pinned to the validated addresses.
 """
 
@@ -48,12 +48,14 @@ class HTTPReply:
 
 
 class Backend(Protocol):
-    """Trusted backend contract that a provider adapter implements.
+    """What the web tools need from a search and fetch provider.
 
-    get() must connect ONLY to supplied validated addresses, use hostname/SNI
-    correctly, disable proxies and automatic redirects, and bound raw/decoded
-    body reads by max_bytes. Returning an oversized body is also rejected here.
-    The injected test backend performs no network operations.
+    LiveBackend is the real one, and the tests use fakes without any network.
+    The checks in fetch_text only hold if every get() keeps these promises:
+    connect only to the addresses it is given, keep the original hostname for
+    TLS and the Host header, use no proxy, never follow a redirect itself, and
+    stop reading once the body passes max_bytes. fetch_text also rejects an
+    oversized body if one comes back.
     """
 
     async def search(self, query: str, max_results: int) -> list[SearchHit]: ...
@@ -262,6 +264,45 @@ def web_fetch(session: Session, backend: Backend):
 
 # The live transport.
 
+
+async def read_body(response: httpx.Response, max_bytes: int) -> bytes:
+    """Read and decompress at most max_bytes + 1 bytes of a streamed response.
+
+    One byte over the limit is enough for fetch_text to reject the page, so the
+    rest is never downloaded. A compressed body is also limited by its
+    compressed size, and must be a complete gzip or deflate stream.
+    """
+    encoding = response.headers.get("content-encoding", "identity").lower().strip()
+    if encoding == "identity":
+        decoder = None
+    elif encoding == "gzip":
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    elif encoding == "deflate":
+        decoder = zlib.decompressobj(zlib.MAX_WBITS)
+    else:
+        raise ValueError("Unsupported HTTP content encoding")
+    body = bytearray()
+    raw_bytes = 0
+    async for chunk in response.aiter_raw(chunk_size=min(65536, max_bytes + 1)):
+        raw_bytes += len(chunk)
+        if decoder is not None and raw_bytes > max_bytes:
+            raise ValueError("Encoded body too large")
+        remaining = max_bytes + 1 - len(body)
+        if decoder is None:
+            body += chunk[:remaining]
+        else:
+            body += decoder.decompress(chunk, remaining)
+        if len(body) > max_bytes:
+            break
+    if (
+        decoder is not None
+        and len(body) <= max_bytes
+        and (not decoder.eof or decoder.unused_data)
+    ):
+        raise ValueError("Invalid compressed HTTP body")
+    return bytes(body[: max_bytes + 1])
+
+
 TAVILY_URL = "https://api.tavily.com/search"
 USER_AGENT = "Ariadne-reference-fetch/0.1 (research benchmark)"
 
@@ -327,16 +368,14 @@ class LiveBackend:
             credits = (data.get("usage") or {}).get("credits")
             if type(credits) is not int or not 0 <= credits <= 1:
                 raise CostAccountingError(
-                    "Search billing is missing or outside the basic-search bound"
+                    "Search billing is missing or above one basic-search credit"
                 )
             self.ledger.settle(request_id, Decimal(credits) * price, None)
             if entry is not None:
                 entry.update(status="settled", credits=credits)
-        except BaseException:
-            # Whether a failed request was charged is unknown: keep the hold.
-            self.ledger.uncertain(request_id)
-            raise
         finally:
+            # A failed request may still have been charged, so its reservation
+            # stays held as uncertain. After a settle this changes nothing.
             self.ledger.uncertain(request_id)
             if self.audit is not None and entry is not None:
                 if entry["status"] == "pending":
@@ -391,49 +430,12 @@ class LiveBackend:
                     )
                     response = await client.send(request, stream=True)
                     try:
-                        body = bytearray()
-                        encoding = (
-                            response.headers.get("content-encoding", "identity")
-                            .lower()
-                            .strip()
-                        )
-                        if encoding not in ("identity", "gzip", "deflate"):
-                            raise ValueError("Unsupported HTTP content encoding")
-                        decoder = (
-                            zlib.decompressobj(
-                                16 + zlib.MAX_WBITS
-                                if encoding == "gzip"
-                                else zlib.MAX_WBITS
-                            )
-                            if encoding != "identity"
-                            else None
-                        )
-                        raw_bytes = 0
-                        async for chunk in response.aiter_raw(
-                            chunk_size=min(65536, max_bytes + 1)
-                        ):
-                            raw_bytes += len(chunk)
-                            if decoder is not None and raw_bytes > max_bytes:
-                                raise ValueError("Encoded body too large")
-                            remaining = max_bytes + 1 - len(body)
-                            body += (
-                                decoder.decompress(chunk, remaining)
-                                if decoder
-                                else chunk[:remaining]
-                            )
-                            if len(body) > max_bytes:
-                                break
-                        if (
-                            decoder is not None
-                            and len(body) <= max_bytes
-                            and (not decoder.eof or decoder.unused_data)
-                        ):
-                            raise ValueError("Invalid compressed HTTP body")
+                        body = await read_body(response, max_bytes)
                     finally:
                         await response.aclose()
                 return HTTPReply(
                     response.status_code,
-                    bytes(body[: max_bytes + 1]),
+                    body,
                     response.headers.get("content-type", "text/plain"),
                     response.headers.get("location"),
                 )

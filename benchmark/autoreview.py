@@ -337,7 +337,7 @@ async def review_attempt(folder, plan, attempt, models, client, key, ledger) -> 
 async def run(
     folder: Path, key: str, ledger, transport=None, *, retry_failed=False
 ) -> list[dict]:
-    """Review retained attempts once; unresolved validity findings await adjudication."""
+    """Review each recorded attempt once; findings that need a decision wait for a human."""
     plan = read_plan(folder)
     settings = plan["settings"]
     if "autoreview" not in settings:

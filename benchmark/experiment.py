@@ -433,7 +433,7 @@ def check_result(row: dict | None) -> None:
         )
     if row["cost_usd"] is None or row["held_usd"] != 0:
         print(
-            f"Billing pending for attempt {row['attempt']}; reservations retained. "
+            f"Billing pending for attempt {row['attempt']}; reservations still held. "
             "Cost totals remain incomplete.",
             flush=True,
         )

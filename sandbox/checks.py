@@ -47,7 +47,7 @@ async def wait_for_service(environment, target_id: str, port: int) -> float:
 
 
 def inspect_docker(kind: str, identifier: str) -> dict:
-    """Read trusted Docker identifiers without exposing environment values."""
+    """Inspect a container or network by id, capturing the output instead of printing it."""
     return json.loads(
         subprocess.run(
             ["docker", kind, "inspect", identifier],

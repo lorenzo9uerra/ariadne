@@ -39,9 +39,7 @@ def review(
     if disposition == "unattributed_failure" and (
         not note.strip() or reviewer == "autoreview-v1"
     ):
-        raise ValueError(
-            "An unattributed failure needs an explicit owner decision and note"
-        )
+        raise ValueError("An unattributed failure needs a note from the owner")
     with journal(folder) as (events, append):
         records = [
             event
@@ -54,7 +52,9 @@ def review(
             if event["event"] == "result" and event["attempt"] == attempt
         ]
         if len(records) != 1 or len(results) > 1:
-            raise ValueError("Review requires one retained native attempt")
+            raise ValueError(
+                "Review requires exactly one recorded attempt with that id"
+            )
         if not results and (
             disposition == "counted"
             or not any(

@@ -45,7 +45,7 @@ def amount(value: object) -> Decimal:
 
 
 def microdollars(value: object) -> int:
-    # Round up at the storage boundary so precision never creates extra credit.
+    # Round up to whole microdollars, so rounding never adds room to spend.
     return int((amount(value) * MICRODOLLARS).to_integral_value(ROUND_CEILING))
 
 
@@ -55,12 +55,13 @@ SPEND_LEDGER = Path("logs/spending.sqlite3")
 
 
 class Ledger:
-    """Track charges and reservations, enforcing any configured local ceilings.
+    """Every paid request's reservation and charge, with any local spending limits.
 
-    Reserved and ambiguous requests consume their reservation until settled.
-    Explicit pre-inference rejections are expected unbilled, without a hold.
-    Crashes retain the hold. Fault attribution never refunds
-    actual API spending; benchmark exclusions are separate reporting decisions.
+    A request holds its reservation until the provider's charge settles it. If
+    the charge can't be confirmed, for example after a crash, the hold stays. A
+    rejection the provider reports before inference is expected to cost nothing
+    and holds nothing. Excluding a faulty attempt from the results never removes
+    its real spending from the ledger.
     """
 
     def __init__(
@@ -244,7 +245,7 @@ class Prices:
         pricing = config["agent_route"]["pricing"]
         context = pricing["context_tokens"]
         if type(context) is not int or context <= 0:
-            raise CostAccountingError("A positive context-token bound is required")
+            raise CostAccountingError("A positive context-token limit is required")
         prompt_limit = pricing.get("max_prompt_tokens")
         if prompt_limit is not None and (
             type(prompt_limit) is not int or not 0 < prompt_limit <= context
@@ -352,7 +353,7 @@ def preflight(config: dict, api_key: str) -> Prices:
 
 
 def billed_response(response: object, provider_name: str) -> tuple[Decimal, str]:
-    """Read provider billing from the trusted raw HTTP response."""
+    """Read the provider's charge from the raw HTTP response."""
     if not isinstance(response, dict):
         raise CostAccountingError("Expected one raw model response")
     usage = response.get("usage")

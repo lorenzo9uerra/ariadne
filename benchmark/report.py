@@ -267,7 +267,7 @@ def overall_scores(runs: list[dict], complete: bool) -> dict:
 
 
 def accounting(rows: list[dict], counted: list[dict]) -> dict:
-    """Time and cost of counted attempts, and everything retained in the ledger."""
+    """Time and cost of the counted attempts, and the spending of every attempt."""
     return {
         "counted_cost_usd": known_sum(counted, "cost_usd"),
         "counted_elapsed_seconds": known_sum(counted, "elapsed_seconds"),
