@@ -24,17 +24,20 @@ from benchmark.answers import is_success, reward_weights
 from benchmark.budgets import load_draft
 from benchmark.oracle import redact
 from benchmark.records import (
-    EXCLUDED,
-    ORDINARY,
     digest,
     fingerprint,
     implementation,
     journal,
     read_plan,
-    retry_interruption,
     verify_inputs,
 )
-from benchmark.report import report
+from benchmark.summary import (
+    EXCLUDED,
+    ORDINARY,
+    retry_interruption,
+    summarize,
+    write_summary,
+)
 from benchmark.tasks import ROOT, Package, load_package, reviewer_context
 
 
@@ -283,7 +286,7 @@ async def execute_job(
             record_results(folder, name)
             row = next(
                 row
-                for row in report(folder)["attempts"]
+                for row in write_summary(folder)["attempts"]
                 if row["attempt"] == str(event.trial_id)
             )
             on_trial_result(row)
@@ -323,7 +326,7 @@ async def execute_job(
 
 
 def active(folder):
-    summary = report(folder)
+    summary = summarize(folder)
     return {(a["planned_job"], a["slot"]): a for a in summary["attempts"]}
 
 
@@ -484,7 +487,7 @@ async def resume_experiment(folder: Path, task=None) -> None:
                     on_trial_result=check_result,
                 )
             finally:
-                report(folder)
+                write_summary(folder)
 
 
 async def run_experiment(
@@ -510,7 +513,7 @@ async def run_experiment(
     try:
         await execute_job(folder, plan, plan["jobs"], on_trial_result=check_result)
     finally:
-        report(folder)
+        write_summary(folder)
     return folder
 
 
@@ -578,4 +581,4 @@ async def _replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
             allow_fix=fix,
         )
     finally:
-        report(folder)
+        write_summary(folder)

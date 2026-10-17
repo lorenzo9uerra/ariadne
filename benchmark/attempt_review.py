@@ -1,9 +1,11 @@
-"""Automatic review of experiment attempts (protocol section 10).
+"""Attempt review: deciding, after an experiment, which attempts count.
 
-Deterministic checks, a triage model and, for solved web attempts, an
-independent content labeller run on read-only copies of each attempt's
-records. Unresolved validity findings wait for targeted adjudication; a seeded
-human audit sample is optional. Backend failures wait for a review retry.
+review records one decision for an attempt, made by a human or automatically.
+Automatic review (protocol section 10) runs deterministic checks, a triage
+model and, for solved web attempts, an independent content labeller on
+read-only copies of each attempt's records. Unresolved findings wait for a
+human decision, a seeded sample can go to a human audit, and backend failures
+wait for a review retry.
 """
 
 import hashlib
@@ -17,17 +19,21 @@ import httpx
 
 from benchmark.answers import is_success
 from benchmark.model import error_details
-from benchmark.records import ORDINARY, journal, read_plan
-from benchmark.report import review_blockers
-from benchmark.review import review
-from benchmark.reviewers import (
+from benchmark.records import digest, implementation, journal, read_plan
+from benchmark.review_model import (
     escape,
     load_reviewers,
     render_user_message,
     tokens,
     verify_route,
 )
-from benchmark.tasks import load_package, read_trial_instance, reviewer_context
+from benchmark.summary import (
+    DISPOSITIONS,
+    ORDINARY,
+    review_blockers,
+    write_summary,
+)
+from benchmark.tasks import ROOT, load_package, read_trial_instance, reviewer_context
 
 REVIEWER = "autoreview-v1"
 TRIAGE_REASON_CHARS = 1024
@@ -334,7 +340,7 @@ async def review_attempt(folder, plan, attempt, models, client, key, ledger) -> 
     }
 
 
-async def run(
+async def run_autoreview(
     folder: Path, key: str, ledger, transport=None, *, retry_failed=False
 ) -> list[dict]:
     """Review each recorded attempt once; findings that need a decision wait for a human."""
@@ -440,3 +446,105 @@ def sample_for_humans(counted: list[dict], plan: dict, fraction) -> set[str]:
     ids = sorted(record["attempt"] for record in counted)
     size = max(1, round(len(ids) * float(fraction)))
     return set(random.Random(plan["seed"]).sample(ids, min(size, len(ids))))
+
+
+# Recording decisions and running automatic review for an experiment.
+
+
+def review(
+    folder: Path,
+    attempt: str,
+    disposition: str,
+    *,
+    reviewer: str,
+    evidence: list[str],
+    contaminated=False,
+    scope_violation=False,
+    fix_version=None,
+    note="",
+) -> None:
+    if (
+        disposition not in DISPOSITIONS
+        or not reviewer.strip()
+        or not evidence
+        or not all(value.strip() for value in evidence)
+    ):
+        raise ValueError("Review needs a disposition, reviewer and evidence references")
+    if disposition != "counted" and (contaminated or scope_violation):
+        raise ValueError("Contamination and scope labels apply to counted outcomes")
+    if type(contaminated) is not bool or type(scope_violation) is not bool:
+        raise ValueError("Review labels must be boolean")
+    if disposition == "unattributed_failure" and (
+        not note.strip() or reviewer == "autoreview-v1"
+    ):
+        raise ValueError("An unattributed failure needs a note from the owner")
+    with journal(folder) as (events, append):
+        records = [
+            event
+            for event in events
+            if event["event"] == "attempt" and event["attempt"] == attempt
+        ]
+        results = [
+            event
+            for event in events
+            if event["event"] == "result" and event["attempt"] == attempt
+        ]
+        if len(records) != 1 or len(results) > 1:
+            raise ValueError(
+                "Review requires exactly one recorded attempt with that id"
+            )
+        if not results and (
+            disposition == "counted"
+            or not any(
+                event["event"] == "job_ended" and event["job"] == records[0]["job"]
+                for event in events
+            )
+        ):
+            raise ValueError(
+                "An unfinished attempt needs a stopped job and failure attribution"
+            )
+        if any(
+            event.get("replaces") == attempt
+            for event in events
+            if event["event"] in ("attempt", "job_started", "replacement_requested")
+        ):
+            raise ValueError(
+                "An already replaced attempt keeps its original attribution"
+            )
+        if results and digest(folder / records[0]["path"]) != results[0]["sha256"]:
+            raise ValueError("Native result changed after collection")
+        append(
+            "review",
+            attempt=attempt,
+            disposition=disposition,
+            reviewer=reviewer,
+            evidence=evidence,
+            contaminated=contaminated,
+            scope_violation=scope_violation,
+            fix_version=fix_version,
+            fixed_implementation=implementation() if fix_version else None,
+            note=note,
+        )
+    write_summary(folder)
+
+
+async def autoreview_experiment(folder: Path, *, retry_failed=False) -> None:
+    """Paid: triage and labelling calls are charged to the shared ledger."""
+    import os
+
+    from dotenv import load_dotenv
+
+    from benchmark.costs import SPEND_LEDGER, Ledger
+
+    load_dotenv(ROOT / ".env", override=False)
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise SystemExit("Set OPENROUTER_API_KEY in .env")
+    settings = read_plan(folder)["settings"]
+    ledger = Ledger(ROOT / SPEND_LEDGER, settings["spending"].get("limit_usd"))
+    records = await run_autoreview(folder, key, ledger, retry_failed=retry_failed)
+    flagged = write_summary(folder)["automatic_review"]["flagged_for_human"]
+    print(
+        f"Automatically reviewed {len(records)} attempts; "
+        f"{len(flagged)} need a human decision."
+    )

@@ -19,11 +19,12 @@ from harbor.models.verifier.result import VerifierResult
 from harbor.viewer.scanner import JobScanner
 
 from benchmark import __main__ as cli
-from benchmark import experiment, records, report
+from benchmark import experiment, records
 from benchmark.answers import METRICS, reward_values
+from benchmark.attempt_review import review as record_review
 from benchmark.budgets import load_draft
 from benchmark.experiment import check_result
-from benchmark.review import review as record_review
+from benchmark.summary import review_blockers
 from benchmark.tasks import ROOT, load_package
 from sandbox.docker_host import ensure_image, select_platform
 from tests.support import (
@@ -215,12 +216,12 @@ def test_native_three_attempts_continue_after_success_and_freeze_order(
     assert other["jobs"] == plan["jobs"]
     settings["budgets"]["agent_turns"] = 1
     assert plan["settings"]["budgets"]["agent_turns"] != 1
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert len({row["attempt"] for row in report["attempts"]}) == 3
     assert not report["complete"] and not report["scores"]
     for row in report["attempts"]:
         count(folder, row["attempt"])
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert report["complete"] and report["counted_cost_usd"] == 3
 
 
@@ -248,7 +249,7 @@ def test_native_batch_checks_each_result_before_starting_another(
         asyncio.run(execution)
     assert configs[0].n_attempts == 3
     assert checked == list(range(1, failed_slot + 1))
-    assert len(experiment.report(folder)["attempts"]) == len(checked)
+    assert len(experiment.summarize(folder)["attempts"]) == len(checked)
     with experiment.journal(folder) as (events, _):
         ended = [e for e in events if e["event"] == "job_ended"]
         assert ended[-1]["status"] == "error"
@@ -276,7 +277,7 @@ def test_jobs_stop_only_when_trial_evidence_fails(harness, tmp_path, monkeypatch
         asyncio.run(execution)
     assert len(configs) == 1
     folder = next((tmp_path / "logs/experiments").iterdir())
-    assert len(experiment.report(folder)["attempts"]) == (
+    assert len(experiment.summarize(folder)["attempts"]) == (
         1 if case == "evidence" else 3
     )
 
@@ -285,20 +286,20 @@ def test_experiments_share_native_job_directory_without_overwriting(harness, tmp
     first = run(harness, tmp_path)
     first_results = {
         Path(row["path"]): Path(row["path"]).read_bytes()
-        for row in experiment.report(first)["attempts"]
+        for row in experiment.summarize(first)["attempts"]
     }
     second = run(harness, tmp_path)
     assert first != second
     assert len(JobScanner(tmp_path / "jobs").list_jobs()) == 2
     assert all(path.read_bytes() == data for path, data in first_results.items())
-    assert len(experiment.report(first)["attempts"]) == 3
-    assert len(experiment.report(second)["attempts"]) == 3
+    assert len(experiment.summarize(first)["attempts"]) == 3
+    assert len(experiment.summarize(second)["attempts"]) == 3
 
 
 def test_json_components_contamination_and_scope_are_per_attempt(harness, tmp_path):
     harness[2].extend([dict.fromkeys(METRICS, 1), dict(zip(METRICS, (1, 0, 1))), None])
     folder = run(harness, tmp_path)
-    rows = experiment.report(folder)["attempts"]
+    rows = experiment.summarize(folder)["attempts"]
     count(
         folder,
         rows[0]["attempt"],
@@ -307,7 +308,7 @@ def test_json_components_contamination_and_scope_are_per_attempt(harness, tmp_pa
     )
     count(folder, rows[1]["attempt"])
     count(folder, rows[2]["attempt"])
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     result = report["runs"][0]
     assert result["raw_pass_at_1"] == pytest.approx(1 / 3)
     assert result["clean_pass_at_1"] == 0
@@ -317,7 +318,7 @@ def test_json_components_contamination_and_scope_are_per_attempt(harness, tmp_pa
     }
     assert "Private withheld text" not in (folder / "summary.json").read_text()
     count(folder, rows[0]["attempt"], scope_violation=True)
-    assert experiment.report(folder)["runs"][0]["raw_pass_at_1"] == 0
+    assert experiment.summarize(folder)["runs"][0]["raw_pass_at_1"] == 0
 
 
 def test_equal_task_weights_and_category_means(harness, tmp_path):
@@ -334,9 +335,9 @@ def test_equal_task_weights_and_category_means(harness, tmp_path):
     )
     # One native job runs every task's attempts.
     assert len(configs) == 1 and len(configs[0].tasks) == 2
-    for row in experiment.report(folder)["attempts"]:
+    for row in experiment.summarize(folder)["attempts"]:
         count(folder, row["attempt"])
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert report["scores"]["clean_pass_at_1"] == 0.5
     assert report["category_scores"]["rev"]["clean_pass_at_1"] == 0
     assert report["category_scores"]["juliet"]["clean_pass_at_1"] == 1
@@ -356,9 +357,9 @@ def test_weighted_rewards_do_not_change_benchmark_success(harness, tmp_path):
     folder = run(harness, tmp_path)
     plan = experiment.read_plan(folder)
     assert plan["jobs"][0]["reward_weights"] == weights
-    for row in experiment.report(folder)["attempts"]:
+    for row in experiment.summarize(folder)["attempts"]:
         count(folder, row["attempt"])
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert [row["raw_solve"] for row in report["attempts"]] == [1, 0, 0]
     assert report["scores"]["clean_pass_at_1"] == 1 / 3
     components = report["runs"][0]["components"]
@@ -370,7 +371,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
     harness, tmp_path
 ):
     folder = run(harness, tmp_path)
-    rows = experiment.report(folder)["attempts"]
+    rows = experiment.summarize(folder)["attempts"]
     original = rows[0]
     path = folder / original["path"]
     original_bytes = path.read_bytes()
@@ -398,13 +399,13 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
         fix_version="synthetic-v2",
     )
     asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
-    pending = experiment.report(folder)
+    pending = experiment.summarize(folder)
     replacement = pending["attempts"][-1]
     assert replacement["replaces"] == original["attempt"]
     assert path.read_bytes() == original_bytes
     assert not pending["complete"]
     count(folder, replacement["attempt"])
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert report["complete"] and report["counted_cost_usd"] == 3
     assert report["counted_elapsed_seconds"] == 30
     assert report["retained_billed_usd"] == 4
@@ -422,7 +423,7 @@ def test_reviewed_fault_replacement_preserves_evidence_and_excludes_only_its_cos
 )
 def test_drift_blocks_generation_even_for_replacements(harness, tmp_path, change):
     folder = run(harness, tmp_path)
-    row = experiment.report(folder)["attempts"][0]
+    row = experiment.summarize(folder)["attempts"][0]
     record_review(
         folder,
         row["attempt"],
@@ -449,7 +450,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
     harness, tmp_path
 ):
     folder = run(harness, tmp_path)
-    original = experiment.report(folder)["attempts"][0]
+    original = experiment.summarize(folder)["attempts"][0]
     path = folder / original["path"]
     saved = path.read_bytes()
     for reviewer, note in (("human", ""), ("autoreview-v1", "Unknown cause")):
@@ -471,7 +472,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
         note="Owner approved exclusion with cause unresolved.",
     )
     asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
-    summary = experiment.report(folder)
+    summary = experiment.summarize(folder)
     assert path.read_bytes() == saved
     assert summary["excluded_attempts"] == [original["attempt"]]
     assert summary["attempts"][-1]["replaces"] == original["attempt"]
@@ -479,7 +480,7 @@ def test_unattributed_replacement_requires_manual_note_and_keeps_original(
 
 def test_replacement_lock_and_reviewed_fix_hash(harness, tmp_path):
     folder = run(harness, tmp_path)
-    row = experiment.report(folder)["attempts"][0]
+    row = experiment.summarize(folder)["attempts"][0]
     record_review(
         folder,
         row["attempt"],
@@ -499,11 +500,11 @@ def test_replacement_lock_and_reviewed_fix_hash(harness, tmp_path):
 
 def test_result_tampering_rejected(harness, tmp_path):
     folder = run(harness, tmp_path)
-    row = experiment.report(folder)["attempts"][0]
+    row = experiment.summarize(folder)["attempts"][0]
     path = folder / row["path"]
     path.write_text(path.read_text() + "\n")
     with pytest.raises(ValueError, match="changed"):
-        experiment.report(folder)
+        experiment.summarize(folder)
     with pytest.raises(ValueError, match="changed"):
         count(folder, row["attempt"])
 
@@ -511,9 +512,9 @@ def test_result_tampering_rejected(harness, tmp_path):
 def test_unknown_billing_not_reported_as_zero(harness, tmp_path):
     harness[2].extend([(dict.fromkeys(METRICS, 1), {})] * 3)
     folder = run(harness, tmp_path)
-    for row in experiment.report(folder)["attempts"]:
+    for row in experiment.summarize(folder)["attempts"]:
         count(folder, row["attempt"])
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert report["complete"]
     assert report["counted_cost_usd"] is None
     assert report["unknown_counted_costs"] == 3
@@ -527,7 +528,7 @@ def test_interrupted_attempt_keeps_evidence_and_missing_slots_pending(
     with pytest.raises(RuntimeError, match="interrupted"):
         run(harness, tmp_path)
     folder = next((tmp_path / "logs/experiments").iterdir())
-    pending = experiment.report(folder)
+    pending = experiment.summarize(folder)
     assert not pending["complete"] and pending["runs"][0]["attempts"][1:] == [
         None,
         None,
@@ -544,7 +545,7 @@ def test_interrupted_attempt_keeps_evidence_and_missing_slots_pending(
         evidence=["interruption and cleanup reviewed"],
     )
     asyncio.run(experiment.replace_attempt(folder, "synthetic-json", 1))
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert report["attempts"][-1]["replaces"] == original["attempt"]
     assert report["unknown_retained_costs"] == 1
     assert not report["complete"]
@@ -567,7 +568,7 @@ def test_check_confirms_evidence_and_removed_containers(
     harness, tmp_path, monkeypatch, capsys, removed
 ):
     folder = run(harness, tmp_path)
-    job = Path(experiment.report(folder)["attempts"][0]["path"]).parents[1]
+    job = Path(experiment.summarize(folder)["attempts"][0]["path"]).parents[1]
     for record in job.glob("*/security-*.json"):
         data = json.loads(record.read_text()) | {"container_id": "synthetic"}
         record.write_text(json.dumps(data))
@@ -607,7 +608,7 @@ def test_three_independent_native_trials_with_mocked_apis(
             [load_package(task)], tmp_path / "jobs", settings=config, seed=7
         )
     )
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert len(requests) == 3 and len(report["attempts"]) == 3
     assert len({row["attempt"] for row in report["attempts"]}) == 3
     assert not report["complete"]
@@ -615,7 +616,7 @@ def test_three_independent_native_trials_with_mocked_apis(
         assert row["raw_solve"] == 1
         assert_isolation_and_cleanup((folder / row["path"]).parent)
         count(folder, row["attempt"])
-    report = experiment.report(folder)
+    report = experiment.summarize(folder)
     assert report["complete"] and report["scores"]["clean_pass_at_1"] == 1
     assert report["retained_held_usd"] == 0
 
@@ -625,7 +626,7 @@ def test_three_independent_native_trials_with_mocked_apis(
 
 @pytest.fixture
 def reviewed(harness, tmp_path, monkeypatch):
-    from benchmark import autoreview
+    from benchmark import attempt_review
 
     triage = {"scope_violation": False, "harness_defect": False, "awareness": "none"}
     answers = []
@@ -636,13 +637,13 @@ def reviewed(harness, tmp_path, monkeypatch):
     async def ask(reviewer, provider, message, *args):
         return answers.pop(0) if answers else triage | {"reason": "Clean."}
 
-    monkeypatch.setattr(autoreview, "verify_route", route)
-    monkeypatch.setattr(autoreview, "ask", ask)
-    monkeypatch.setattr(autoreview, "load_package", lambda root: harness[0])
+    monkeypatch.setattr(attempt_review, "verify_route", route)
+    monkeypatch.setattr(attempt_review, "ask", ask)
+    monkeypatch.setattr(attempt_review, "load_package", lambda root: harness[0])
     folder = run(harness, tmp_path)
 
     def review_all():
-        return asyncio.run(autoreview.run(folder, "key", ledger=None))
+        return asyncio.run(attempt_review.run_autoreview(folder, "key", ledger=None))
 
     return folder, answers, review_all
 
@@ -651,7 +652,7 @@ def test_clean_attempts_are_counted_and_one_is_sampled(reviewed):
     folder, _, review_all = reviewed
     records = review_all()
     assert len(records) == 3 and not any(record["findings"] for record in records)
-    summary = experiment.report(folder)
+    summary = experiment.summarize(folder)
     assert summary["complete"]
     assert {row["review"]["disposition"] for row in summary["attempts"]} == {"counted"}
     automatic = summary["automatic_review"]
@@ -672,13 +673,13 @@ def test_findings_wait_for_a_human_and_overturns_are_counted(reviewed):
     records = review_all()
     flagged = [r["attempt"] for r in records if r["findings"]]
     assert flagged and records[0]["findings"] == ["scope_violation_suspected"]
-    summary = experiment.report(folder)
+    summary = experiment.summarize(folder)
     assert not summary["complete"]
     assert summary["automatic_review"]["flagged_for_human"] == flagged
     assert review_all() == []  # Findings wait for a human, without paid re-review.
     sampled = summary["automatic_review"]["human_sample"][0]
     count(folder, sampled, contaminated=True)
-    automatic = experiment.report(folder)["automatic_review"]
+    automatic = experiment.summarize(folder)["automatic_review"]
     assert (
         automatic["human_sample_checked"] == automatic["human_sample_overturned"] == 1
     )
@@ -686,7 +687,7 @@ def test_findings_wait_for_a_human_and_overturns_are_counted(reviewed):
 
 def test_injected_text_goes_to_a_human_whatever_the_triage_says(reviewed):
     folder, _, review_all = reviewed
-    trial = (folder / experiment.report(folder)["attempts"][0]["path"]).parent
+    trial = (folder / experiment.summarize(folder)["attempts"][0]["path"]).parent
     trajectory = trial / "agent/trajectory.json"
     os.chmod(trajectory, 0o644)
     trajectory.write_text(
@@ -699,7 +700,7 @@ def test_injected_text_goes_to_a_human_whatever_the_triage_says(reviewed):
 
 def test_records_are_hashed_and_left_unchanged(reviewed):
     folder, _, review_all = reviewed
-    paths = [folder / row["path"] for row in experiment.report(folder)["attempts"]]
+    paths = [folder / row["path"] for row in experiment.summarize(folder)["attempts"]]
     before = {path: path.read_bytes() for path in paths}
     records = review_all()
     assert {path: path.read_bytes() for path in paths} == before
@@ -707,8 +708,8 @@ def test_records_are_hashed_and_left_unchanged(reviewed):
 
 
 def test_long_transcripts_are_trimmed_to_the_limit():
-    from benchmark.autoreview import transcript
-    from benchmark.reviewers import tokens
+    from benchmark.attempt_review import transcript
+    from benchmark.review_model import tokens
 
     steps = [
         {
@@ -724,10 +725,10 @@ def test_long_transcripts_are_trimmed_to_the_limit():
 
 
 def test_a_flag_written_before_any_output_shows_it_is_flagged(monkeypatch, tmp_path):
-    from benchmark import autoreview
+    from benchmark import attempt_review
 
     monkeypatch.setattr(
-        autoreview,
+        attempt_review,
         "read_trial_instance",
         lambda *a: SimpleNamespace(target="flag{abc}"),
     )
@@ -746,7 +747,9 @@ def test_a_flag_written_before_any_output_shows_it_is_flagged(monkeypatch, tmp_p
             "agent/trajectory.json": (json.dumps({"steps": steps}).encode(), ""),
             "private/audit.jsonl": (b"", ""),
         }
-        return autoreview.deterministic_checks(package, tmp_path, "t", records, True)[0]
+        return attempt_review.deterministic_checks(
+            package, tmp_path, "t", records, True
+        )[0]
 
     run_step = {
         "step_id": 1,
@@ -773,9 +776,9 @@ def test_a_flag_written_before_any_output_shows_it_is_flagged(monkeypatch, tmp_p
 def test_web_content_the_labeller_rejects_goes_to_a_human(
     reviewed, harness, tmp_path, monkeypatch
 ):
-    from benchmark import autoreview
+    from benchmark import attempt_review
 
-    monkeypatch.setattr(autoreview, "reviewer_context", lambda package: {})
+    monkeypatch.setattr(attempt_review, "reviewer_context", lambda package: {})
 
     async def ask(reviewer, provider, message, *args):
         if message.startswith("<transcript>"):
@@ -787,7 +790,7 @@ def test_web_content_the_labeller_rejects_goes_to_a_human(
             }
         return {"verdict": "forbidden", "reason": "A writeup."}
 
-    monkeypatch.setattr(autoreview, "ask", ask)
+    monkeypatch.setattr(attempt_review, "ask", ask)
     folder = run(harness, tmp_path / "web")
     delivered = {
         "id": "d1",
@@ -796,11 +799,11 @@ def test_web_content_the_labeller_rejects_goes_to_a_human(
         "tool": "web_fetch",
         "candidate": {"text": "Walkthrough.", "url": "https://example.org/"},
     }
-    for row in experiment.report(folder)["attempts"]:
+    for row in experiment.summarize(folder)["attempts"]:
         result = folder / row["path"]
         (result.parent / "private").mkdir(exist_ok=True)
         (result.parent / "private/audit.jsonl").write_text(json.dumps(delivered) + "\n")
-    records = asyncio.run(autoreview.run(folder, "key", ledger=None))
+    records = asyncio.run(attempt_review.run_autoreview(folder, "key", ledger=None))
     assert all("contamination_suspected" in r["findings"] for r in records)
 
 
@@ -851,7 +854,7 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
 
 
 def test_review_backend_failure_stops_batch_and_retry_preserves_evidence(reviewed):
-    from benchmark import autoreview
+    from benchmark import attempt_review
 
     folder, answers, review_all = reviewed
     answers.append(None)
@@ -862,18 +865,20 @@ def test_review_backend_failure_stops_batch_and_retry_preserves_evidence(reviewe
     assert len(failed) == 1
     original = folder / failed[0]["path"]
     before = original.read_bytes()
-    automatic = experiment.report(folder)["automatic_review"]
+    automatic = experiment.summarize(folder)["automatic_review"]
     assert len(automatic["backend_failed"]) == 1 and not automatic["flagged_for_human"]
-    records = asyncio.run(autoreview.run(folder, "key", None, retry_failed=True))
+    records = asyncio.run(
+        attempt_review.run_autoreview(folder, "key", None, retry_failed=True)
+    )
     assert len(records) == 3
     assert original.read_bytes() == before
     assert records[0]["path"] != failed[0]["path"]
-    assert experiment.report(folder)["automatic_review"]["backend_failed"] == []
+    assert experiment.summarize(folder)["automatic_review"]["backend_failed"] == []
 
 
 def test_review_failure_retains_transport_details_without_raw_response():
-    from benchmark import autoreview
-    from benchmark.reviewers import ReviewResult
+    from benchmark import attempt_review
+    from benchmark.review_model import ReviewResult
 
     async def respond(*args, **kwargs):
         return ReviewResult(
@@ -891,9 +896,11 @@ def test_review_failure_retains_transport_details_without_raw_response():
         )
 
     reviewer = SimpleNamespace(review=respond, settings={"model": "synthetic"})
-    with pytest.raises(autoreview.AutomaticReviewFailed) as failed:
+    with pytest.raises(attempt_review.AutomaticReviewFailed) as failed:
         asyncio.run(
-            autoreview.ask(reviewer, "Provider", "synthetic", None, "key", None, "run")
+            attempt_review.ask(
+                reviewer, "Provider", "synthetic", None, "key", None, "run"
+            )
         )
     details = failed.value.details
     assert details["status"] == "provider_error"
@@ -902,8 +909,8 @@ def test_review_failure_retains_transport_details_without_raw_response():
 
 
 def test_invalid_review_output_excerpt_is_redacted():
-    from benchmark import autoreview
-    from benchmark.reviewers import ReviewResult
+    from benchmark import attempt_review
+    from benchmark.review_model import ReviewResult
 
     async def respond(*args, **kwargs):
         return ReviewResult(
@@ -923,9 +930,9 @@ def test_invalid_review_output_excerpt_is_redacted():
         )
 
     reviewer = SimpleNamespace(review=respond, settings={"model": "synthetic"})
-    with pytest.raises(autoreview.AutomaticReviewFailed) as failure:
+    with pytest.raises(attempt_review.AutomaticReviewFailed) as failure:
         asyncio.run(
-            autoreview.ask(
+            attempt_review.ask(
                 reviewer, "Provider", "synthetic", None, "secret-key", None, "run"
             )
         )
@@ -937,7 +944,7 @@ def test_invalid_review_output_excerpt_is_redacted():
 
 
 def test_triage_schema_compatibility_keeps_parser_length_limit():
-    from benchmark.autoreview import SCHEMA, parse_triage
+    from benchmark.attempt_review import SCHEMA, parse_triage
 
     assert SCHEMA["json_schema"]["schema"]["properties"]["reason"] == {"type": "string"}
     output = {
@@ -954,11 +961,11 @@ def test_triage_schema_compatibility_keeps_parser_length_limit():
 
 def test_raw_scores_remain_provisional_while_content_review_is_pending(reviewed):
     folder, _, _ = reviewed
-    summary = experiment.report(folder)
+    summary = experiment.summarize(folder)
     assert not summary["complete"] and summary["scores"] == {}
     assert summary["provisional_raw_scores"]["raw_pass_at_1"] == 1
     assert all(r["clean_pass_at_1"] is None for r in summary["runs"])
-    assert report.review_blockers(
+    assert review_blockers(
         ["contamination_suspected", "harness_defect_suspected"],
         {"scope_violation": False},
     ) == ["contamination_suspected", "harness_defect_suspected"]
@@ -1019,7 +1026,7 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
                 on_trial_result(row)
 
     monkeypatch.setattr(experiment, "execute_job", execute)
-    monkeypatch.setattr(experiment, "report", lambda folder: None)
+    monkeypatch.setattr(experiment, "write_summary", lambda folder: None)
     if partial:
         asyncio.run(execute(tmp_path, {}, [item], slots=[1]))
         calls.clear()
@@ -1117,7 +1124,7 @@ def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
     monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
     monkeypatch.setattr(experiment, "check_result", lambda row: None)
-    monkeypatch.setattr(experiment, "report", lambda folder: None)
+    monkeypatch.setattr(experiment, "write_summary", lambda folder: None)
 
     async def replace(folder, name, slot):
         calls.append(("replace", slot))

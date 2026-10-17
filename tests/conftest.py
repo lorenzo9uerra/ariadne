@@ -66,12 +66,12 @@ def reviewed_web(live_mock, request):
 
 
 def mock_web(monkeypatch):
-    from benchmark import reviewers
+    from benchmark import review_model, web_review
     from benchmark.web import HTTPReply, SearchHit
 
     monkeypatch.setenv("TAVILY_API_KEY", "synthetic-search-key")
-    monkeypatch.setattr(reviewers, "read_json", lambda *args: endpoint_data())
-    original = reviewers.live_monitor
+    monkeypatch.setattr(review_model, "read_json", lambda *args: endpoint_data())
+    original = web_review.live_monitor
     decisions, seen = [], []
 
     def reply(request):
