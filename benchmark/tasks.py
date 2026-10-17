@@ -447,7 +447,7 @@ class Marker(Record):
 
 
 class ReviewerContext(Record):
-    """private/reviewer_context.json: what the web reviewer knows about a task."""
+    """private/reviewer_context.json: what the classifiers are told about a task."""
 
     schema_version: Literal[2]
     context_version: str

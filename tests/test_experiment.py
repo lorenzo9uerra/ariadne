@@ -592,7 +592,7 @@ def test_check_confirms_evidence_and_removed_containers(
     reason="Unpaid Harbor/Docker integration",
 )
 def test_three_independent_native_trials_with_mocked_apis(
-    tmp_path, live_mock, reviewed_web
+    tmp_path, live_mock, filtered_web
 ):
     config, replies, requests = live_mock
     platform = select_platform("any")
@@ -709,7 +709,7 @@ def test_records_are_hashed_and_left_unchanged(reviewed):
 
 def test_long_transcripts_are_trimmed_to_the_limit():
     from benchmark.attempt_review import transcript
-    from benchmark.review_model import tokens
+    from benchmark.classifiers import tokens
 
     steps = [
         {
@@ -878,10 +878,10 @@ def test_review_backend_failure_stops_batch_and_retry_preserves_evidence(reviewe
 
 def test_review_failure_retains_transport_details_without_raw_response():
     from benchmark import attempt_review
-    from benchmark.review_model import ReviewResult
+    from benchmark.classifiers import ClassifierResult
 
     async def respond(*args, **kwargs):
-        return ReviewResult(
+        return ClassifierResult(
             None,
             "provider_error",
             error="HTTP 400",
@@ -895,11 +895,11 @@ def test_review_failure_retains_transport_details_without_raw_response():
             ],
         )
 
-    reviewer = SimpleNamespace(review=respond, settings={"model": "synthetic"})
+    classifier = SimpleNamespace(classify=respond, settings={"model": "synthetic"})
     with pytest.raises(attempt_review.AutomaticReviewFailed) as failed:
         asyncio.run(
             attempt_review.ask(
-                reviewer, "Provider", "synthetic", None, "key", None, "run"
+                classifier, "Provider", "synthetic", None, "key", None, "run"
             )
         )
     details = failed.value.details
@@ -910,10 +910,10 @@ def test_review_failure_retains_transport_details_without_raw_response():
 
 def test_invalid_review_output_excerpt_is_redacted():
     from benchmark import attempt_review
-    from benchmark.review_model import ReviewResult
+    from benchmark.classifiers import ClassifierResult
 
     async def respond(*args, **kwargs):
-        return ReviewResult(
+        return ClassifierResult(
             None,
             "invalid",
             raw=json.dumps(
@@ -929,11 +929,11 @@ def test_invalid_review_output_excerpt_is_redacted():
             ),
         )
 
-    reviewer = SimpleNamespace(review=respond, settings={"model": "synthetic"})
+    classifier = SimpleNamespace(classify=respond, settings={"model": "synthetic"})
     with pytest.raises(attempt_review.AutomaticReviewFailed) as failure:
         asyncio.run(
             attempt_review.ask(
-                reviewer, "Provider", "synthetic", None, "secret-key", None, "run"
+                classifier, "Provider", "synthetic", None, "secret-key", None, "run"
             )
         )
     assert failure.value.details["finish_reason"] == "stop"

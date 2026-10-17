@@ -70,8 +70,8 @@ def apply_limits(config: dict, overrides: dict) -> None:
     zero_allowed = {
         "total_tool_calls",
         "web_calls",
-        "reviewer_calls",
-        "reviewer_tokens",
+        "filter_calls",
+        "filter_tokens",
         "model_retries",
         "redirects",
     }
@@ -96,23 +96,20 @@ def apply_limits(config: dict, overrides: dict) -> None:
         config[section].update(values)
 
     budgets = overrides.get("budgets", {})
-    if "web_calls" in budgets and "reviewer_calls" not in budgets:
-        config["budgets"]["reviewer_calls"] = 2 * budgets["web_calls"]
-    if "reviewer_tokens" not in budgets and set(budgets) & {
+    if "web_calls" in budgets and "filter_calls" not in budgets:
+        config["budgets"]["filter_calls"] = 2 * budgets["web_calls"]
+    if "filter_tokens" not in budgets and set(budgets) & {
         "web_calls",
-        "reviewer_calls",
-        "reviewer_max_input_tokens",
-        "reviewer_max_output_tokens",
+        "filter_calls",
+        "filter_max_input_tokens",
+        "filter_max_output_tokens",
     }:
         values = config["budgets"]
         # Two stages per web call; each decision allows one retry.
-        values["reviewer_tokens"] = (
-            values["reviewer_calls"]
+        values["filter_tokens"] = (
+            values["filter_calls"]
             * 2
-            * (
-                values["reviewer_max_input_tokens"]
-                + values["reviewer_max_output_tokens"]
-            )
+            * (values["filter_max_input_tokens"] + values["filter_max_output_tokens"])
         )
 
 
@@ -122,8 +119,8 @@ class Counters:
     proposed: int = 0
     non_submit: int = 0
     web: int = 0
-    reviewer_calls: int = 0
-    reviewer_tokens: int = 0
+    filter_calls: int = 0
+    filter_tokens: int = 0
     reservations: dict[str, str | None] = field(default_factory=dict)
 
     def reserve(self, call_id: str, name: str) -> str | None:
@@ -142,18 +139,20 @@ class Counters:
         self.reservations[call_id] = reason
         return reason
 
-    def reserve_reviewer(self) -> int:
-        remaining = self.limits["reviewer_tokens"] - self.reviewer_tokens
-        if self.reviewer_calls >= self.limits["reviewer_calls"]:
-            raise BudgetExceeded("reviewer_calls")
-        if remaining <= self.limits["reviewer_max_output_tokens"]:
-            raise BudgetExceeded("reviewer_tokens")
-        self.reviewer_calls += 1
+    def reserve_filter(self) -> int:
+        remaining = self.limits["filter_tokens"] - self.filter_tokens
+        if self.filter_calls >= self.limits["filter_calls"]:
+            raise BudgetExceeded("filter_calls")
+        if remaining <= self.limits["filter_max_output_tokens"]:
+            raise BudgetExceeded("filter_tokens")
+        self.filter_calls += 1
         return remaining
 
-    def charge_reviewer(self, tokens: int) -> None:
+    def charge_filter(self, tokens: int) -> None:
         if type(tokens) is not int or tokens < 0:
-            raise ValueError("The reviewer must report nonnegative integer token usage")
-        self.reviewer_tokens += tokens
-        if self.reviewer_tokens > self.limits["reviewer_tokens"]:
-            raise BudgetExceeded("reviewer_tokens")
+            raise ValueError(
+                "The web filter's classifier must report nonnegative integer token usage"
+            )
+        self.filter_tokens += tokens
+        if self.filter_tokens > self.limits["filter_tokens"]:
+            raise BudgetExceeded("filter_tokens")

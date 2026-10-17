@@ -18,15 +18,15 @@ from pathlib import Path
 import httpx
 
 from benchmark.answers import is_success
-from benchmark.model import error_details
-from benchmark.records import digest, implementation, journal, read_plan
-from benchmark.review_model import (
+from benchmark.classifiers import (
     escape,
-    load_reviewers,
+    load_classifiers,
     render_user_message,
     tokens,
     verify_route,
 )
+from benchmark.model import error_details
+from benchmark.records import digest, implementation, journal, read_plan
 from benchmark.summary import (
     DISPOSITIONS,
     ORDINARY,
@@ -202,8 +202,8 @@ class AutomaticReviewFailed(ValueError):
         self.details = details
 
 
-async def ask(reviewer, provider, message, client, key, ledger, run_id) -> dict:
-    outcome = await reviewer.review(
+async def ask(classifier, provider, message, client, key, ledger, run_id) -> dict:
+    outcome = await classifier.classify(
         client, message, key, ledger, run_id, "autoreview", billing_provider=provider
     )
     if outcome.status != "ok":
@@ -232,7 +232,7 @@ async def ask(reviewer, provider, message, client, key, ledger, run_id) -> dict:
                 "status": outcome.status,
                 "error": outcome.error,
                 "latency_seconds": outcome.latency_seconds,
-                "model": reviewer.settings["model"],
+                "model": classifier.settings["model"],
                 "provider": provider,
                 "requests": [
                     {
@@ -424,18 +424,18 @@ def unreviewed(events: list[dict], retry_failed: bool) -> list[dict]:
 
 
 async def load_models(settings: dict) -> dict:
-    """The triage and labelling reviewers, each with its verified billing route."""
+    """The triage and labelling classifiers, each with its verified billing route."""
     names = settings["autoreview"]
     models = {}
     for role in ("triage", "labelling"):
-        reviewer = load_reviewers(settings, [names[f"{role}_model"]])[0]
+        classifier = load_classifiers(settings, [names[f"{role}_model"]])[0]
         if role == "triage":
-            reviewer.prompt, reviewer.schema, reviewer.parse = (
+            classifier.prompt, classifier.schema, classifier.parse = (
                 PROMPT.read_text(),
                 SCHEMA,
                 parse_triage,
             )
-        models[role] = (reviewer, await verify_route(reviewer, 15))
+        models[role] = (classifier, await verify_route(classifier, 15))
     return models
 
 
