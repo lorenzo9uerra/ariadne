@@ -1,0 +1,8 @@
+{
+  "name": "web-02",
+  "private": true,
+  "dependencies": {
+    "@fastify/express": "4.0.2",
+    "fastify": "^5.0.0"
+  }
+}

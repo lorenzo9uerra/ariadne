@@ -40,3 +40,7 @@ lockfile.
 Shortcut audit passed. The Oracle reference run passed on amd64 on
 2026-10-13 with full rewards and confirmed isolation evidence
 (job `2026-10-13__21-21-25`).
+
+## Publication
+
+2026-01-19: the advisory for CVE-2026-22037 (GHSA-g6q3-96cp-5r5m).
