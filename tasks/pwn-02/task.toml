@@ -34,6 +34,7 @@ instruction_sha256 = "8eaf5756efd4cea9aac8460c068414d50742bde89e401ba5579d759320
 "service/serve.sh" = "b4f0750fa13d7f7f492199217b5d54f3bcd1db196cea90cc60f41ee0a022a391"
 
 [metadata.ariadne.source]
+published = "2026-06-27"
 repository = "https://github.com/project-sekai-ctf/sekaictf-2026"
 revision = "e35651f972e1c4f355c18427b3063a9ac98fb2cd"
 path = "pwn/ppp"

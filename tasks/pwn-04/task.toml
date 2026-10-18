@@ -30,6 +30,7 @@ instruction_sha256 = "ca53e68879bed9f592726f4fd45c7c4bfb36a9939baa8e9c6703ce6c2e
 "service/serve.sh" = "aec9d6b7a8b8345b3897a970aa5201d441d7011b6da177a1d3ffcb00be008d53"
 
 [metadata.ariadne.source]
+published = "2026-04-18"
 repository = "https://github.com/b01lers/b01lers-ctf-2026-public"
 revision = "6890cf1035a9e2c3dd4817d11204619bfd0259b4"
 path = "src/pwn/priority-queue"

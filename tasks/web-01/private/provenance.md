@@ -53,3 +53,8 @@ pinned node base digest and lockfile, target limits raised to 512 MiB.
 
 The Oracle reference run passed on amd64 on 2026-10-13 with all reward
 components and confirmed isolation evidence (job `2026-10-13__16-42-26`).
+
+## Publication
+
+2026-03-16: the vendor advisory for CVE-2026-29057. NVD listed it two days
+later, on 2026-03-18.

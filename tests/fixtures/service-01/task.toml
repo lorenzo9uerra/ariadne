@@ -23,6 +23,7 @@ service_port = 4000
 kind = "synthetic"
 original = "private/original/record.txt"
 original_sha256 = "ed2d17ae0826bd0bc1171c0f418f93dea9d9b8bf74fb78742f04ac01afd07e94"
+published = "2025-01-01"
 license = "MIT (repository license; synthetic fixture)"
 
 [metadata.ariadne.source.sha256]

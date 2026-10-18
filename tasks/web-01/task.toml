@@ -29,6 +29,7 @@ instruction_sha256 = "f3cb287bf20ea740f1e72098c21d3fd3085d77eaf30bf5e72dfae20146
 "service/entrypoint.sh" = "21d8d0cc943125e09c8b911ee22f3fdd1fec4ccb3c0aa86f57a94a949a7b30d9"
 
 [metadata.ariadne.source]
+published = "2026-03-16"
 repository = "https://github.com/Nayekah/Next.js-Proof-of-Concept"
 revision = "dfffcfaf87a13765c74b2cb4890a255cf15e189b"
 path = "pocs/cve-2026-29057"

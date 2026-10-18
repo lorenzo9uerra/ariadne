@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -213,6 +214,11 @@ def load_package(root: Path) -> Package:
         raise ValueError("Service packages require a generated flag")
     if manifest["description"] != "instruction.md":
         raise ValueError("Player task text must be instruction.md")
+    # When the task's material first became public (protocol section 8.3).
+    if not re.fullmatch(
+        r"\d{4}(-\d{2}-\d{2})?", str(manifest["source"].get("published", ""))
+    ):
+        raise ValueError("source.published must be a year or a YYYY-MM-DD date")
     if manifest["answer_type"] == "json":
         target = json_target(root, manifest, config)
     else:

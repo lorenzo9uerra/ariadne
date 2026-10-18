@@ -30,6 +30,7 @@ instruction_sha256 = "9b3fdc7129d919c50c2b8ff3832c3b606bc3fd3b51b3126f19920c56fa
 "service/serve.sh" = "742fe6579ef568dfbdeb6b3934c27db11ca5644533ad2c9383bfe22b9482b695"
 
 [metadata.ariadne.source]
+published = "2025-04-18"
 repository = "https://github.com/b01lers/b01lers-ctf-2025-public"
 revision = "518df2ba8e0014cafeb767d9f57bbe449ac69972"
 path = "src/pwn/scanfun"

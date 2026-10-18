@@ -61,6 +61,7 @@ def opaque_package(tmp_path):
             f'instance_sha256 = "{hashlib.sha256(BUILDER.encode()).hexdigest()}"\n'
             '[source]\noriginal = "private/original/record.txt"\n'
             f'original_sha256 = "{hashlib.sha256(original).hexdigest()}"\n'
+            'published = "2025-01-01"\n'
             f'sha256 = {{ "files/handout.txt" = "{hashlib.sha256(PUBLIC).hexdigest()}" }}\n'
         )
     )
@@ -359,6 +360,7 @@ destination.mkdir(parents=True, exist_ok=True)
             f'instance_sha256 = "{hashlib.sha256(builder.encode()).hexdigest()}"\n'
             '[source]\noriginal = "private/original/record.txt"\n'
             f'original_sha256 = "{hashlib.sha256(original).hexdigest()}"\n'
+            'published = "2025-01-01"\n'
             "sha256 = {}\n"
         )
     )
@@ -387,6 +389,7 @@ def test_empty_static_directory_is_rejected(tmp_path):
             f'instance_sha256 = "{hashlib.sha256(builder).hexdigest()}"\n'
             '[source]\noriginal = "private/original/record.txt"\n'
             f'original_sha256 = "{hashlib.sha256(original).hexdigest()}"\n'
+            'published = "2025-01-01"\n'
             "sha256 = {}\n"
         )
     )
