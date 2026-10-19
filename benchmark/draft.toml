@@ -165,6 +165,41 @@ cached_input_per_million = "0.13"
 context_tokens = 1048576
 discount = "0.5"
 
+[agents."deepseek/deepseek-v4-flash-0731"]
+provider = "deepinfra/fp8"
+provider_name = "DeepInfra"
+output_token_parameter = "max_tokens"
+token_encoding = "o200k_base" # Context estimate only; provider usage is authoritative.
+temperature = 0.6
+reasoning_effort = "high"
+max_output_tokens = 384000
+
+[agents."deepseek/deepseek-v4-flash-0731".pricing]
+# DeepInfra FP8 rates verified on 2026-10-19.
+# https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash-0731/endpoints
+input_per_million = "0.06"
+output_per_million = "0.18"
+cached_input_per_million = "0.015"
+context_tokens = 1048576
+
+[agents."z-ai/glm-5.3-flash"]
+provider = "novita/fp8"
+provider_name = "Novita"
+output_token_parameter = "max_tokens"
+token_encoding = "o200k_base"
+temperature = 0.6
+reasoning_effort = "max"
+max_output_tokens = 131072
+
+[agents."z-ai/glm-5.3-flash".pricing]
+# Novita FP8 rates verified on 2026-10-19; includes its 44% discount.
+# https://openrouter.ai/api/v1/models/z-ai/glm-5.3-flash/endpoints
+input_per_million = "0.084"
+output_per_million = "0.28"
+cached_input_per_million = "0.0168"
+context_tokens = 1048576
+discount = "0.44"
+
 [agents."xiaomi/mimo-v2.6-pro"]
 provider = "xiaomi/fp8"
 provider_name = "Xiaomi"
