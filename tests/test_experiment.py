@@ -718,10 +718,11 @@ def test_long_transcripts_are_trimmed_to_the_limit():
             "message": "word " * 3000,
             "observation": {"results": [{"content": "x" * 20000}]},
         }
-        for i in range(10)
+        for i in range(100)
     ]
     text, cut = transcript({"steps": steps}, 2000)
     assert cut and tokens(text) <= 2000 and "[step 0 agent]" in text
+    assert "[step 99 agent]" in text
 
 
 def test_a_flag_written_before_any_output_shows_it_is_flagged(monkeypatch, tmp_path):
@@ -975,7 +976,7 @@ def test_raw_scores_remain_provisional_while_content_review_is_pending(reviewed)
     "disposition,expected",
     [(None, 0), ("counted", 0), ("external_failure", 1), ("unattributed_failure", 1)],
 )
-def test_resume_preserves_finished_trials_and_replaces_attributed_timeout(
+def test_resume_respects_review_decisions_and_stopping_reasons(
     disposition, expected, monkeypatch
 ):
     row = {
@@ -987,6 +988,10 @@ def test_resume_preserves_finished_trials_and_replaces_attributed_timeout(
     }
     monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
     assert len(experiment.open_slots(Path("synthetic"), TASK)) == expected
+    row["stop_reason"] = "filter_error"
+    assert len(experiment.open_slots(Path("synthetic"), TASK)) == (
+        0 if disposition == "counted" else 1
+    )
 
 
 @pytest.mark.parametrize("partial", [False, True])

@@ -130,7 +130,8 @@ def transcript(trajectory: dict, limit: int) -> tuple[str, bool]:
     # Still too long: keep the start and the end of the attempt.
     while tokens(text) > limit and len(lines) > 2:
         del lines[len(lines) // 2]
-    return "\n".join(lines), True
+        text = "\n".join(lines)
+    return text, True
 
 
 def deterministic_checks(

@@ -336,6 +336,8 @@ def open_slots(folder: Path, item: dict) -> list[tuple[int, dict | None]]:
     result = []
     for slot in range(1, item["attempts"] + 1):
         row = rows.get((item["name"], slot))
+        if row and (row.get("review") or {}).get("disposition") == "counted":
+            continue
         usable = (
             row is not None
             and (row.get("review") or {}).get("disposition") not in EXCLUDED
