@@ -25,6 +25,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 ADDR_NO_RANDOMIZE = 0x0040000
 
+# The reviewed deny-by-default baseline: Docker 27.5.1's
+# profiles/seccomp/default.json, pinned byte for byte.
+SECCOMP_BASELINE = ROOT / "benchmark" / "seccomp-baseline.json"
+
+# The one approved addition: pwn targets disable ASLR for each service
+# process with personality(ADDR_NO_RANDOMIZE).
+SECCOMP_EXCEPTION = {
+    "names": ["personality"],
+    "action": "SCMP_ACT_ALLOW",
+    "args": [{"index": 0, "value": ADDR_NO_RANDOMIZE, "op": "SCMP_CMP_EQ"}],
+}
+
 
 def package_path(root: Path, relative: str) -> Path:
     path = PurePosixPath(relative)
@@ -46,7 +58,13 @@ def package_path(root: Path, relative: str) -> Path:
 
 
 def validate_target_seccomp(root: Path, manifest: dict, declared_service: dict) -> None:
-    """Admit only a deny-by-default profile that adds ADDR_NO_RANDOMIZE."""
+    """Admit only the reviewed baseline profile plus its approved exception.
+
+    Permissions are pinned by comparing contents, not hashes: a hash proves
+    only that a profile is unchanged, not that what it allows is safe. Rule
+    order is compared exactly, because where allow and deny rules overlap
+    (as for clone3) the first match decides.
+    """
     relative = manifest.get("target_seccomp")
     if not relative:
         return
@@ -56,26 +74,23 @@ def validate_target_seccomp(root: Path, manifest: dict, declared_service: dict) 
         profile = json.loads(package_path(root, relative).read_text())
     except json.JSONDecodeError as error:
         raise ValueError("target_seccomp is not JSON") from error
-    if (
-        not isinstance(profile, dict)
-        or profile.get("defaultAction") != "SCMP_ACT_ERRNO"
-    ):
-        raise ValueError("target seccomp must keep deny-by-default")
-    allowed = False
-    for rule in profile.get("syscalls", []):
-        if "personality" not in rule.get("names", []):
-            continue
-        if rule.get("action") != "SCMP_ACT_ALLOW":
-            continue
-        for arg in rule.get("args") or []:
-            if (
-                arg.get("index") == 0
-                and arg.get("value") == ADDR_NO_RANDOMIZE
-                and arg.get("op") == "SCMP_CMP_EQ"
-            ):
-                allowed = True
-    if not allowed:
-        raise ValueError("target seccomp must allow ADDR_NO_RANDOMIZE")
+    baseline = json.loads(SECCOMP_BASELINE.read_text())
+    fields = {key: value for key, value in baseline.items() if key != "syscalls"}
+    rules = profile.get("syscalls") if isinstance(profile, dict) else None
+    reviewed = (
+        isinstance(profile, dict)
+        and {key: value for key, value in profile.items() if key != "syscalls"}
+        == fields
+        and isinstance(rules, list)
+        and rules.count(SECCOMP_EXCEPTION) == 1
+        and [rule for rule in rules if rule != SECCOMP_EXCEPTION]
+        == baseline["syscalls"]
+    )
+    if not reviewed:
+        raise ValueError(
+            "target_seccomp must be the reviewed baseline profile plus only "
+            "the approved ADDR_NO_RANDOMIZE exception"
+        )
 
 
 @dataclass(frozen=True)
