@@ -40,6 +40,7 @@ original = "private/original/advisory.md"
 original_sha256 = "19fdfb4754cf1415243f1b5b79f812e32846725b27fafa1c08b3fa135a96c08f"
 
 [metadata.ariadne.service_limits]
+pids = 128
 cpus = 1.0
 memory_bytes = 536870912
 

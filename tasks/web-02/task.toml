@@ -38,13 +38,14 @@ original = "private/original/poc/app.js"
 original_sha256 = "c3d86b84c66e649e746dbd3000de63615c94c57d6588db3a5b01362c49b230d3"
 
 [metadata.ariadne.service_limits]
+pids = 128
 cpus = 1.0
 memory_bytes = 536870912
 
 [metadata.ariadne.source.sha256]
 "files/app.js" = "46092035b668b477e4c0f9bea9781ab4ef7e8dfde1dc00217d5ea3f3e5398af2"
-"files/package-lock.json" = "5a305c006cbaacb936a9dcbea4b1b4f7bbcb6746816e5a9f676d4bc68bce3d11"
-"files/package.json" = "9028e8cacd55915d07430ad61bb3a561bf18a65ae5a75f84ecbbb86d2ab108b9"
+"files/package-lock.json" = "5e55736d5b8709ee8c3fde3fc8fcc93b3d440a80b444bb7e50e284bb1fdc40dd"
+"files/package.json" = "701423f820ffbe1d9d1a0d68842c8d92d912a349b841baa849b91802a1850315"
 
 [verifier]
 network_mode = "no-network"

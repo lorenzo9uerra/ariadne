@@ -1,5 +1,5 @@
 {
-  "name": "web-02",
+  "name": "app",
   "private": true,
   "dependencies": {
     "@fastify/express": "4.0.2",

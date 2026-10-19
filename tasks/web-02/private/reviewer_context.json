@@ -35,7 +35,7 @@
       "format": "JSON",
       "language": "JavaScript",
       "architecture": null,
-      "source_sha256": "9028e8cacd55915d07430ad61bb3a561bf18a65ae5a75f84ecbbb86d2ab108b9",
+      "source_sha256": "701423f820ffbe1d9d1a0d68842c8d92d912a349b841baa849b91802a1850315",
       "summary": "Pinned application dependencies."
     },
     {
@@ -45,7 +45,7 @@
       "format": "JSON",
       "language": "JavaScript",
       "architecture": null,
-      "source_sha256": "5a305c006cbaacb936a9dcbea4b1b4f7bbcb6746816e5a9f676d4bc68bce3d11",
+      "source_sha256": "5e55736d5b8709ee8c3fde3fc8fcc93b3d440a80b444bb7e50e284bb1fdc40dd",
       "summary": "Deterministic dependency lockfile (npm ci at image build)."
     }
   ],
