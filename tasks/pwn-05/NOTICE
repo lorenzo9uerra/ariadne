@@ -1,0 +1,12 @@
+Ariadne pwn-05 redistributes parts of the upstream b01lers CTF 2026 handout.
+
+Challenge files (MIT License, Copyright (c) 2025 b01lers; see LICENSE):
+  files/chall, files/forth.c, files/Dockerfile
+
+Bundled GNU libc and its dynamic loader (LGPL-2.1-or-later; see COPYING.LIB):
+  files/libc.so.6, files/ld-linux-x86-64.so.2
+  GNU C Library (Debian GLIBC 2.36-9+deb12u9) stable release version 2.36.
+  Obtained unmodified from the upstream package (build_out/, pinned in
+  private/upstream.json).
+  The corresponding source is preserved in the Debian archive:
+  https://snapshot.debian.org/package/glibc/2.36-9+deb12u9/
