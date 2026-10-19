@@ -1,8 +1,8 @@
 # Use a pinned Debian snapshot for all system packages.
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
-COPY tool-versions.env /etc/ariadne-tools.env
-RUN . /etc/ariadne-tools.env \
+COPY tool-versions.env /etc/tools.env
+RUN . /etc/tools.env \
     && case "$(dpkg --print-architecture)" in \
         amd64) platform_packages="$SYSTEM_PACKAGES_AMD64" ;; \
         arm64) platform_packages="$SYSTEM_PACKAGES_ARM64" ;; \
@@ -18,7 +18,7 @@ RUN . /etc/ariadne-tools.env \
     && dpkg-query -W > /opt/system-packages.txt \
     && rm -rf /var/lib/apt/lists/*
 
-RUN . /etc/ariadne-tools.env \
+RUN . /etc/tools.env \
     && case "$(dpkg --print-architecture)" in \
         amd64) uv_arch=x86_64; uv_sha="$UV_SHA256_AMD64"; jdk_url="$JDK_URL_AMD64"; jdk_sha="$JDK_SHA256_AMD64" ;; \
         arm64) uv_arch=aarch64; uv_sha="$UV_SHA256_ARM64"; jdk_url="$JDK_URL_ARM64"; jdk_sha="$JDK_SHA256_ARM64" ;; \
@@ -46,30 +46,30 @@ ENV JAVA_HOME=/opt/java \
     UV_PYTHON_INSTALL_DIR=/opt/python \
     UV_CACHE_DIR=/tmp/uv-cache
 COPY python/ /opt/agent-python/
-RUN . /etc/ariadne-tools.env \
+RUN . /etc/tools.env \
     && uv sync --project /opt/agent-python --locked --no-dev --python "$PYTHON_VERSION" \
     && rm -rf /tmp/uv-cache
-COPY Decompile.java /opt/ariadne-scripts/Decompile.java
+COPY Decompile.java /opt/decompile-scripts/Decompile.java
 # Precompile the exporter and discard the temporary analysis data and settings.
-RUN . /etc/ariadne-tools.env \
+RUN . /etc/tools.env \
     && mkdir -p /tmp/ghidra-build/home /tmp/ghidra-build/project \
     && XDG_CONFIG_HOME=/tmp/ghidra-build/home/config \
        GHIDRA_HEADLESS_MAXMEM="$GHIDRA_HEAP" \
        GHIDRA_HEADLESS_JAVA_OPTIONS=-Duser.home=/tmp/ghidra-build/home \
        /usr/bin/timeout -k 5s 120s /opt/ghidra/support/analyzeHeadless \
          /tmp/ghidra-build/project bootstrap -import /bin/true -noanalysis \
-         -scriptPath /opt/ariadne-scripts -postScript Decompile.java \
+         -scriptPath /opt/decompile-scripts -postScript Decompile.java \
          /tmp/ghidra-build/result /tmp/ghidra-build/status '' \
          "$DECOMPILE_FUNCTION_SECONDS" "$DECOMPILE_OUTPUT_BYTES" -deleteProject \
     && test -f /tmp/ghidra-build/status \
-    && cp -a "/tmp/ghidra-build/home/config/ghidra/$GHIDRA_DIRECTORY/osgi/compiled-bundles" /opt/ariadne-script-cache \
-    && chmod -R a+rX /opt/ariadne-script-cache \
+    && cp -a "/tmp/ghidra-build/home/config/ghidra/$GHIDRA_DIRECTORY/osgi/compiled-bundles" /opt/script-cache \
+    && chmod -R a+rX /opt/script-cache \
     && rm -rf /tmp/ghidra-build
 COPY --chmod=0755 decompile /usr/local/bin/decompile
 
 # Load GEF into every gdb session so its heap, vmmap and telescope views are
 # available, including in batch mode.
-RUN . /etc/ariadne-tools.env \
+RUN . /etc/tools.env \
     && mkdir -p /opt/gef /etc/gdb \
     && curl -fLsS "$GEF_URL" -o /opt/gef/gef.py \
     && printf '%s  /opt/gef/gef.py\n' "$GEF_SHA256" | sha256sum -c - \

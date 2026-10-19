@@ -12,10 +12,10 @@ import tempfile
 import time
 from pathlib import Path
 
-CONFIG = Path("/etc/ariadne-tools.env")
+CONFIG = Path("/etc/tools.env")
 GHIDRA = Path("/opt/ghidra/support/analyzeHeadless")
-SCRIPTS = Path("/opt/ariadne-scripts")
-CACHE = Path("/opt/ariadne-script-cache")
+SCRIPTS = Path("/opt/decompile-scripts")
+CACHE = Path("/opt/script-cache")
 
 
 def settings() -> dict[str, str]:
