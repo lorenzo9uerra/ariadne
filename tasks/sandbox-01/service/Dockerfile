@@ -18,7 +18,7 @@ RUN dpkg-deb -x /tmp/ca-certificates.deb /tmp/ca \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY files/agent_sandbox.py agent_sandbox.py
+COPY files/agent_files.py agent_files.py
 
 WORKDIR /workspace
 COPY service/entrypoint.sh /entrypoint.sh
