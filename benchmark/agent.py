@@ -9,6 +9,7 @@ import time
 from importlib.metadata import version as package_version
 from pathlib import Path
 from string import Template
+from typing import NoReturn
 
 from dotenv import load_dotenv
 from harbor.agents.base import BaseAgent
@@ -39,7 +40,11 @@ from benchmark.tasks import ROOT, package_path, reviewer_context
 from benchmark.web import NetworkBackend, web_fetch, web_search
 from benchmark.web_filter import FilterClassifier, filter_classifier
 from sandbox.container import script
-from sandbox.environment import SUBMISSION_BYTES, AriadneDockerEnvironment
+from sandbox.environment import (
+    SUBMISSION_BYTES,
+    AriadneDockerEnvironment,
+    OutputLimitExceeded,
+)
 
 PROMPT = Path(__file__).with_name("prompts") / "agent.txt"
 
@@ -455,9 +460,12 @@ class AgentAttempt:
                 str(limit),
             ]
         )
-        result = await self.environment.exec(
-            capture, user="1000:1000", timeout_sec=timeout + 5
-        )
+        try:
+            result = await self.environment.exec(
+                capture, user="1000:1000", timeout_sec=timeout + 5
+            )
+        except OutputLimitExceeded:
+            self.shell_failure(error_type="OutputLimitExceeded")
         if result.return_code == 124:
             return json.dumps(
                 {
@@ -470,17 +478,26 @@ class AgentAttempt:
             )
         if result.return_code != 0 or result.stderr:
             stderr = result.stderr or ""
-            self.audit.record(
-                "shell_transport",
-                f"bash-{self.session.counters.non_submit}",
-                status="error",
+            self.shell_failure(
                 return_code=result.return_code,
                 stderr=stderr[:2048],
                 stderr_truncated=len(stderr) > 2048,
             )
-            self.session.stop_reason = "shell_transport_error"
-            raise PolicyStopped("Shell output capture failed")
-        return json.dumps(decode_capture(result.stdout or "", limit))
+        try:
+            return json.dumps(decode_capture(result.stdout or "", limit))
+        except (ValueError, RuntimeError):
+            self.shell_failure(error_type="InvalidCapture")
+
+    def shell_failure(self, **details) -> NoReturn:
+        """Record why the shell's output can't be trusted, and end the attempt."""
+        self.audit.record(
+            "shell_transport",
+            f"bash-{self.session.counters.non_submit}",
+            status="error",
+            **details,
+        )
+        self.session.stop_reason = "shell_transport_error"
+        raise PolicyStopped("Shell output capture failed") from None
 
     async def submit(self, answer: str) -> str:
         if self.clock.remaining() <= 0:

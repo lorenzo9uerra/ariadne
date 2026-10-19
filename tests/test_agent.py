@@ -510,8 +510,12 @@ def test_shell_transport_failure_retains_private_diagnostics_and_stops(
     config, replies, seen = live_mock
     replies.extend(
         [
-            completion([api_call("bash", {"command": "synthetic command"})]),
-            completion([api_call("submit", {"answer": SAFE})]),
+            completion(
+                [
+                    api_call("bash", {"command": "synthetic command"}),
+                    api_call("submit", {"answer": SAFE}, "submit"),
+                ]
+            ),
         ]
     )
     environment = environment_stub(tmp_path)
@@ -523,7 +527,7 @@ def test_shell_transport_failure_retains_private_diagnostics_and_stops(
     context, trajectory = run_agent(environment, config)
     assert context.metadata["stop_reason"] == "shell_transport_error"
     assert context.metadata["submission_attempted"] is False
-    assert len(seen) == 1
+    assert len(seen) == 1 and environment._submitted_answer is None
     entries = [
         json.loads(line)
         for line in (environment.trial_paths.trial_dir / "private/audit.jsonl")
@@ -680,14 +684,31 @@ def test_cancelled_bash_keeps_pending_proposal(tmp_path, live_mock, monkeypatch)
 @pytest.mark.skipif(
     os.environ.get("RUN_DOCKER") != "1", reason="Unpaid mocked-agent Docker integration"
 )
-@pytest.mark.parametrize("case", ["submit", "file_without_submit", "conflicting_file"])
-def test_mocked_ariadne_agent_through_native_job(tmp_path, live_mock, case):
+@pytest.mark.parametrize(
+    "case", ["submit", "file_without_submit", "conflicting_file", "output_overflow"]
+)
+def test_mocked_ariadne_agent_through_native_job(
+    tmp_path, live_mock, monkeypatch, case
+):
     config, replies, seen = live_mock
     platform = select_platform("any")
     image = ensure_image(platform)
     package = review_package(tmp_path / "package", platform.split("/")[1])
     task = export_review_task(package, tmp_path / "task", image, platform)
-    if case == "submit":
+    if case == "output_overflow":
+        monkeypatch.setattr("sandbox.environment.TRANSPORT_BYTES", 131072)
+        # Write through the wrapper's parent, bypassing its stdout capture.
+        command = "parent=$(awk '/^PPid:/{print $2}' /proc/$PPID/status); "
+        command += "head -c 262144 /dev/zero > /proc/$parent/fd/1"
+        replies.append(
+            completion(
+                [
+                    api_call("bash", {"command": command}),
+                    api_call("submit", {"answer": SAFE}, "submit"),
+                ]
+            )
+        )
+    elif case == "submit":
         replies.extend(
             [
                 completion(
@@ -744,6 +765,14 @@ def test_mocked_ariadne_agent_through_native_job(tmp_path, live_mock, case):
     path = next(folder.glob("*/result.json"))
     trial = TrialResult.model_validate_json(path.read_text())
     assert trial.exception_info is None
+    if case == "output_overflow":
+        assert (
+            trial.agent_result is not None and trial.agent_result.metadata is not None
+        )
+        assert trial.agent_result.metadata["stop_reason"] == "shell_transport_error"
+        assert trial.agent_result.metadata["submission_attempted"] is False
+        audit = (path.parent / "private/audit.jsonl").read_text()
+        assert '"error_type": "OutputLimitExceeded"' in audit
     assert trial.verifier_result is not None
     assert trial.verifier_result.rewards == reward_values(
         dict.fromkeys(

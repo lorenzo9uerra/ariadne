@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 import yaml
+from harbor.environments.base import ExecResult, OutputCallback
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.docker.docker import DockerEnvironment
 from harbor.models.task.config import NetworkMode
@@ -45,6 +46,13 @@ from sandbox.docker_host import (
 LOG_BYTES = 16 * 1024 * 1024
 SUBMISSION_BYTES = 4096
 SUBMISSION_NAME = "submission.json"
+# Includes room for base64-encoded log transfers.
+TRANSPORT_BYTES = 32 * 1024 * 1024
+
+
+class OutputLimitExceeded(RuntimeError):
+    """Docker output exceeded the host's transport limit."""
+
 
 UPLOAD = script("upload.py")
 
@@ -92,6 +100,82 @@ class AriadneDockerEnvironment(DockerEnvironment):
     Each trial creates two instances: the agent's environment, built from the
     task's environment/ folder, and Harbor's separate verifier, built from tests/.
     """
+
+    @staticmethod
+    async def _collect_buffered_output(
+        process: asyncio.subprocess.Process,
+        *,
+        timeout_sec: int | None,
+        stdin_data: bytes | None = None,
+        on_output: OutputCallback | None = None,
+    ) -> ExecResult:
+        """Harbor's output collection, with a limit on the host.
+
+        The agent controls what its commands write and can bypass the shell
+        wrapper's per-stream limits, so the whole Docker response is capped
+        here. Past TRANSPORT_BYTES the Docker client is stopped and
+        OutputLimitExceeded is raised. With on_output, complete lines are
+        streamed as they arrive, as Harbor does.
+        """
+        assert process.stdout is not None
+        stream = process.stdout
+
+        async def read() -> bytes:
+            output, line = bytearray(), bytearray()
+            # Reading one byte past the limit is enough to detect an overflow.
+            while chunk := await stream.read(
+                min(65536, TRANSPORT_BYTES - len(output) + 1)
+            ):
+                if len(output) + len(chunk) > TRANSPORT_BYTES:
+                    raise OutputLimitExceeded("Docker output exceeded its host limit")
+                output += chunk
+                if on_output is not None:
+                    line += chunk
+                    while (end := line.find(b"\n")) != -1:
+                        await on_output(
+                            line[: end + 1].decode(errors="replace"), "stdout"
+                        )
+                        del line[: end + 1]
+            if on_output is not None and line:
+                await on_output(line.decode(errors="replace"), "stdout")
+            await process.wait()
+            return bytes(output)
+
+        async def write() -> None:
+            if stdin_data is not None:
+                assert process.stdin is not None
+                try:
+                    process.stdin.write(stdin_data)
+                    await process.stdin.drain()
+                    process.stdin.close()
+                    await process.stdin.wait_closed()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        reader = asyncio.create_task(read())
+        tasks = [reader, asyncio.create_task(write())]
+        try:
+            # Harbor treats a timeout of 0 as no timeout.
+            async with asyncio.timeout(timeout_sec or None):
+                await asyncio.gather(*tasks)
+            output = reader.result()
+        except BaseException as error:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await DockerEnvironment._terminate_process(process)
+            if isinstance(error, TimeoutError):
+                raise RuntimeError(
+                    f"Command timed out after {timeout_sec} seconds"
+                ) from None
+            raise
+        return ExecResult(
+            stdout=output.decode(errors="replace") or None,
+            stderr=None,
+            return_code=process.returncode or 0,
+        )
+
+    _collect_streamed_output = _collect_buffered_output
 
     def __init__(self, *args, **kwargs):
         # Harbor supplies its own log bind mounts to every provider. Discard
