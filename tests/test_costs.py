@@ -379,7 +379,9 @@ def test_selected_profile_prices_and_reservations(model):
     assert config["budgets"]["agent_max_output_tokens"] == (
         262144 if is_mistral else 131072
     )
-    assert config["agent_route"]["reasoning"] is True
+    assert config["agent_route"]["reasoning_effort"] == (
+        "high" if is_mistral else "xhigh"
+    )
     assert config["agent_route"]["temperature"] == 0.6
     assert "limit_usd" not in config["spending"]
     default = load_draft()
@@ -413,7 +415,7 @@ def test_mimo_uses_official_thinking_mode_and_prices():
     prices = Prices.from_config(config)
     assert config["agent_route"]["provider"] == "xiaomi/fp8"
     assert config["agent_route"]["provider_name"] == "Xiaomi"
-    assert config["agent_route"]["reasoning"] is True
+    assert config["agent_route"]["reasoning_effort"] == "high"
     assert config["agent_route"]["temperature"] == 1.0
     assert config["budgets"]["agent_max_output_tokens"] == 131072
     assert prices.reservation(131072) == Decimal("0.57016320")

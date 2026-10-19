@@ -117,7 +117,7 @@ provider_name = "Mistral"
 output_token_parameter = "max_tokens"
 token_encoding = "o200k_base" # Context estimate only; provider usage is authoritative.
 temperature = 0.6
-reasoning = true
+reasoning_effort = "high"
 max_output_tokens = 262144
 
 [agents."mistralai/mistral-large-4-0".pricing]
@@ -135,7 +135,7 @@ provider_name = "Alibaba"
 output_token_parameter = "max_tokens"
 token_encoding = "o200k_base"
 temperature = 0.6
-reasoning = true
+reasoning_effort = "xhigh"
 max_output_tokens = 131072
 
 [agents."qwen/qwen3.8-flash".pricing]
@@ -153,7 +153,7 @@ provider_name = "Novita"
 output_token_parameter = "max_tokens"
 token_encoding = "o200k_base"
 temperature = 0.6
-reasoning = true
+reasoning_effort = "max"
 max_output_tokens = 131072
 
 [agents."z-ai/glm-5.3".pricing]
@@ -171,7 +171,7 @@ provider_name = "Xiaomi"
 output_token_parameter = "max_tokens"
 token_encoding = "o200k_base"
 temperature = 1.0 # Fixed by Xiaomi in thinking mode.
-reasoning = true # Single thinking mode; effort levels do not change intensity.
+reasoning_effort = "high" # Single thinking mode; every effort level behaves the same.
 max_output_tokens = 131072
 
 [agents."xiaomi/mimo-v2.6-pro".pricing]

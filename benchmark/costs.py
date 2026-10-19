@@ -308,9 +308,7 @@ def check_endpoint(data: dict, config: dict, prices: Prices) -> None:
         or amount(pricing.get("request", 0)) != 0
         or endpoint["context_length"] != prices.context_tokens
         or endpoint.get("max_prompt_tokens") != prices.max_prompt_tokens
-        or (
-            "reasoning" in route and "reasoning" not in endpoint["supported_parameters"]
-        )
+        or "reasoning" not in endpoint["supported_parameters"]
         or endpoint["max_completion_tokens"]
         < config["budgets"]["agent_max_output_tokens"]
         or "tools" not in endpoint["supported_parameters"]

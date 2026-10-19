@@ -397,7 +397,9 @@ def test_reasoning_profile_request_and_billing(model_factory, model_id):
         requests.append(body)
         assert body["model"] == model_id
         assert body["provider"]["only"] == [config["agent_route"]["provider"]]
-        assert body["reasoning"] == {"enabled": True}
+        assert body["reasoning"] == {
+            "effort": config["agent_route"]["reasoning_effort"]
+        }
         assert body["temperature"] == (
             1.0 if model_id == "xiaomi/mimo-v2.6-pro" else 0.6
         )

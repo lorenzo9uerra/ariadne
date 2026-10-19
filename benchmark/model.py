@@ -331,8 +331,7 @@ class OpenRouterModel:
             "provider": routing(self.config),
             self.config["agent_route"]["output_token_parameter"]: output,
         }
-        if "reasoning" in self.config["agent_route"]:
-            body["reasoning"] = {"enabled": self.config["agent_route"]["reasoning"]}
+        body["reasoning"] = {"effort": self.config["agent_route"]["reasoning_effort"]}
         return body, estimate, output
 
     async def _attempt(
