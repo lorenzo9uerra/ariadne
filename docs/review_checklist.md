@@ -105,8 +105,8 @@ to flag tasks; JSON tasks instead validate ground truth and component scoring.
 
 Each test is one scripted attempt; each must end the way the protocol says.
 
-- [ ] The 61st tool call ends the attempt; the 11th web call is rejected and
-      the attempt continues.
+- [ ] The first tool call over the limit ends the attempt; the first web
+      call over the web limit is rejected and the attempt continues.
 - [ ] Turn and elapsed-time limits end the attempt at their configured values.
       Provider token usage is recorded without a cumulative agent-token cap;
       requests that cannot fit the context window stop before tool execution.

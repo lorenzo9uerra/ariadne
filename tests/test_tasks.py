@@ -39,12 +39,9 @@ def test_all_tasks_use_native_definitions_and_separate_verifier():
         )
         assert not (package.root / "challenge.toml").exists()
         assert not (package.root / "description.md").exists()
-        for name, source in (
-            ("answers.py", "answers.py"),
-            ("verify.py", "verifier.py"),
-        ):
+        for name in ("answers.py", "verifier.py"):
             assert (package.root / "tests" / name).read_bytes() == (
-                ROOT / "benchmark" / source
+                ROOT / "benchmark" / name
             ).read_bytes()
         assert not (package.root / "environment/player").exists()
         assert not any((package.root / "environment").glob("*private*"))
