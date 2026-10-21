@@ -24,7 +24,12 @@ from benchmark.tasks import (
 )
 from benchmark.verifier import read_or_none, score
 from sandbox.docker_host import ensure_image, select_platform
-from tests.support import assert_isolation_and_cleanup, native_flag_task, run_trial
+from tests.support import (
+    assert_isolation_and_cleanup,
+    native_flag_task,
+    native_record,
+    run_trial,
+)
 
 PUBLIC = b"Opaque public handout for a wiring check.\n"
 BUILDER = """import json
@@ -426,13 +431,3 @@ def test_flag_grader_preserves_matching_rules(tmp_path, submission, expected):
     assert score(read_or_none(path), "flag{CaseSensitive}", answer_type="flag") == {
         "flag_correct": expected
     }
-
-
-def native_record(text):
-    import tomllib
-
-    import toml
-
-    return toml.dumps(
-        {"schema_version": "1.4", "metadata": {"ariadne": tomllib.loads(text)}}
-    )

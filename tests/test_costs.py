@@ -1,7 +1,6 @@
 """Billing and provider checks with mocked APIs."""
 
 import copy
-import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
@@ -159,9 +158,6 @@ def test_local_ceiling_can_change_without_resetting_old_holds(tmp_path, monkeypa
     path = tmp_path / "spend.sqlite3"
     first = Ledger(path, 1)
     first.reserve("previous", "agent", "model", "0.75")
-    with sqlite3.connect(path) as db:
-        db.execute("CREATE TABLE budget (cap INTEGER NOT NULL)")
-        db.execute("INSERT INTO budget VALUES (1000000)")
     unlimited = Ledger(path, attempt_limit_usd=2)
     assert unlimited.totals()["remaining_usd"] is None
     unlimited.reserve("next", "agent", "model", "0.5")

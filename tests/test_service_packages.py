@@ -14,7 +14,7 @@ from benchmark.tasks import (
     validate_target_seccomp,
     write_target_flag,
 )
-from tests.support import load_protocol, target_limits
+from tests.support import load_protocol, native_record, target_limits
 
 FIXTURE = ROOT / "tests" / "fixtures" / "service-01"
 FLAG_KEY = "target:/workspace/flag.txt"
@@ -214,13 +214,3 @@ def test_json_service_package_is_rejected(tmp_path):
     )
     with pytest.raises(ValueError, match="Service packages require"):
         load_package(root)
-
-
-def native_record(text):
-    import tomllib
-
-    import toml
-
-    return toml.dumps(
-        {"schema_version": "1.4", "metadata": {"ariadne": tomllib.loads(text)}}
-    )

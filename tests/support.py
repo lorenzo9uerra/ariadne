@@ -16,6 +16,7 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 
 import httpx
+import toml
 import yaml
 from harbor.agents.base import BaseAgent
 from harbor.agents.capabilities import AgentCapabilities
@@ -363,6 +364,12 @@ class ScriptedAgent(BaseAgent):
 
 
 # Synthetic tasks and the Docker boundary.
+
+
+def native_record(text):
+    return toml.dumps(
+        {"schema_version": "1.4", "metadata": {"ariadne": tomllib.loads(text)}}
+    )
 
 
 def export_task(package: Package, destination: Path, image: str, platform: str) -> Path:
