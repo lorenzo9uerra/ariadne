@@ -3,6 +3,7 @@
 Logs, spending records and credentials remain on the evaluation host.
 """
 
+import asyncio
 import contextlib
 import hashlib
 import os
@@ -11,6 +12,8 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from harbor.environments.docker.docker import DockerEnvironment
 
 SANDBOX_DIR = Path(__file__).resolve().parent
 
@@ -99,23 +102,32 @@ def image_tag(platform: str) -> str:
     return digest.hexdigest()[:16]
 
 
-def ensure_image(platform: str) -> str:
+async def ensure_image(platform: str) -> str:
     """Build the shared image on the active Docker host if its tag is missing."""
     name = f"ariadne-sandbox:{image_tag(platform)}"
-    present = subprocess.run(
-        ["docker", "image", "inspect", name], capture_output=True, timeout=30
+    for command, timeout in (
+        (["image", "inspect", name], 30),
+        (["build", "--platform", platform, "-t", name, str(SANDBOX_DIR)], 3600),
+    ):
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output_task = asyncio.create_task(process.communicate())
+        try:
+            async with asyncio.timeout(timeout):
+                output, _ = await asyncio.shield(output_task)
+        except BaseException:
+            await DockerEnvironment._terminate_process(process)
+            await asyncio.gather(output_task, return_exceptions=True)
+            raise
+        if process.returncode == 0:
+            return name
+    raise RuntimeError(
+        f"Building {name} failed:\n{output.decode(errors='replace')[-4000:]}"
     )
-    if present.returncode == 0:
-        return name
-    result = subprocess.run(
-        ["docker", "build", "--platform", platform, "-t", name, str(SANDBOX_DIR)],
-        capture_output=True,
-        text=True,
-        timeout=3600,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Building {name} failed:\n{result.stderr[-4000:]}")
-    return name
 
 
 def docker_endpoint() -> str:

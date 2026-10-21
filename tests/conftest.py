@@ -1,5 +1,6 @@
 """Shared test setup: the sandbox image, and mocked model and classifier services."""
 
+import asyncio
 import copy
 import json
 import os
@@ -22,7 +23,7 @@ os.environ.setdefault("SANDBOX_IMAGE_TAG", image_tag(PLATFORM))
 def pytest_sessionstart(session):
     # Build the shared image once, before any Docker test, if it is missing.
     if os.environ.get("RUN_DOCKER") == "1":
-        ensure_image(select_platform("any"))
+        asyncio.run(ensure_image(select_platform("any")))
 
 
 @pytest.fixture

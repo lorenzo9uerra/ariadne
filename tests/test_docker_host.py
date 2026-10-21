@@ -1,6 +1,10 @@
 """Docker host selection and the host canary, with Docker and SSH mocked."""
 
+import asyncio
 import subprocess
+import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -141,25 +145,28 @@ def test_image_tag_covers_every_copied_input_and_the_platform(tmp_path, monkeypa
 def _docker_runs(monkeypatch, outcomes):
     calls = []
 
-    def run(args, **kwargs):
-        calls.append(args)
+    async def run(*args, **kwargs):
+        calls.append(list(args))
         code = outcomes.pop(0)
-        return subprocess.CompletedProcess(args, code, "", "build log tail")
+        return SimpleNamespace(
+            returncode=code,
+            communicate=AsyncMock(return_value=(b"build log tail", None)),
+        )
 
-    monkeypatch.setattr(docker_host.subprocess, "run", run)
+    monkeypatch.setattr(docker_host.asyncio, "create_subprocess_exec", run)
     return calls
 
 
 def test_present_image_is_not_rebuilt(monkeypatch):
     calls = _docker_runs(monkeypatch, [0])
-    name = docker_host.ensure_image("linux/arm64")
+    name = asyncio.run(docker_host.ensure_image("linux/arm64"))
     assert name == f"ariadne-sandbox:{docker_host.image_tag('linux/arm64')}"
     assert [c[:3] for c in calls] == [["docker", "image", "inspect"]]
 
 
 def test_missing_image_is_built_once_for_its_platform(monkeypatch):
     calls = _docker_runs(monkeypatch, [1, 0])
-    name = docker_host.ensure_image("linux/amd64")
+    name = asyncio.run(docker_host.ensure_image("linux/amd64"))
     assert calls[1][:4] == ["docker", "build", "--platform", "linux/amd64"]
     assert calls[1][4:6] == ["-t", name]
 
@@ -167,4 +174,41 @@ def test_missing_image_is_built_once_for_its_platform(monkeypatch):
 def test_failed_build_reports_its_output(monkeypatch):
     _docker_runs(monkeypatch, [1, 1])
     with pytest.raises(RuntimeError, match="build log tail"):
-        docker_host.ensure_image("linux/arm64")
+        asyncio.run(docker_host.ensure_image("linux/arm64"))
+
+
+def test_startup_timeout_stops_the_build_process(monkeypatch):
+    spawn = asyncio.create_subprocess_exec
+
+    async def check():
+        ready = asyncio.Event()
+        processes = []
+
+        async def run(*args, **kwargs):
+            if args[1] == "image":
+                return SimpleNamespace(
+                    returncode=1, communicate=AsyncMock(return_value=(b"", None))
+                )
+            process = await spawn(
+                sys.executable, "-c", "import time; time.sleep(30)", **kwargs
+            )
+            processes.append(process)
+            ready.set()
+            return process
+
+        monkeypatch.setattr(docker_host.asyncio, "create_subprocess_exec", run)
+        task = asyncio.create_task(docker_host.ensure_image("linux/arm64"))
+        try:
+            await asyncio.wait_for(ready.wait(), 5)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(task, 0.01)
+            assert processes[0].returncode is not None
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            for process in processes:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+
+    asyncio.run(check())

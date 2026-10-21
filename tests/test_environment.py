@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import sys
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -14,6 +15,7 @@ from harbor.agents.oracle import OracleAgent
 from harbor.environments.base import ExecResult
 from harbor.environments.docker.docker import DockerEnvironment
 from harbor.models.agent.context import AgentContext
+from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.task.task import Task
 from harbor.models.trajectories import Trajectory
 from harbor.models.trial.paths import TrialPaths
@@ -34,7 +36,9 @@ from tests.support import (
     WRONG,
     ScriptedAgent,
     assert_isolation_and_cleanup,
+    export_review_task,
     export_task,
+    review_package,
     run_trial,
     synthetic_package,
 )
@@ -43,6 +47,34 @@ DOCKER = pytest.mark.skipif(
     os.environ.get("RUN_DOCKER") != "1",
     reason="Opt-in unpaid Harbor/Docker integration",
 )
+
+
+def test_shared_image_is_prepared_during_startup(tmp_path, monkeypatch):
+    task = export_review_task(
+        review_package(tmp_path / "package"),
+        tmp_path / "task",
+        "synthetic-image",
+        "linux/amd64",
+    )
+    build = AsyncMock(side_effect=RuntimeError("Synthetic build failed"))
+    start = AsyncMock()
+    monkeypatch.setattr(
+        "sandbox.environment.select_platform", lambda required: "linux/amd64"
+    )
+    monkeypatch.setattr("sandbox.environment.ensure_image", build)
+    monkeypatch.setattr(DockerEnvironment, "start", start)
+    environment = AriadneDockerEnvironment(
+        environment_dir=task / "environment",
+        environment_name="synthetic",
+        session_id="synthetic-env",
+        trial_paths=TrialPaths(trial_dir=tmp_path / "trial"),
+        task_env_config=Task(task).config.environment,
+        network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK),
+    )
+    build.assert_not_called()
+    with pytest.raises(RuntimeError, match="Synthetic build failed"):
+        asyncio.run(environment.start(force_build=False))
+    start.assert_not_awaited()
 
 
 @pytest.mark.parametrize("streamed", [False, True])
@@ -566,7 +598,7 @@ def test_nested_log_paths_cannot_escape_export(name):
 @pytest.fixture(scope="module")
 def native_image():
     platform = select_platform("any")
-    return platform, ensure_image(platform)
+    return platform, asyncio.run(ensure_image(platform))
 
 
 @DOCKER

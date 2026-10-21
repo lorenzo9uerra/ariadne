@@ -599,7 +599,7 @@ def test_three_independent_native_trials_with_mocked_apis(
     task = export_review_task(
         review_package(tmp_path / "package", platform.split("/")[1]),
         tmp_path / "task",
-        ensure_image(platform),
+        asyncio.run(ensure_image(platform)),
         platform,
     )
     replies.extend(completion([api_call("submit", {"answer": SAFE})]) for _ in range(3))

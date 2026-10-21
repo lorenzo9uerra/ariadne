@@ -1,5 +1,6 @@
 """Tool-wrapper checks and opt-in analysis of a harmless synthetic program."""
 
+import asyncio
 import importlib.machinery
 import importlib.util
 import json
@@ -115,7 +116,6 @@ def test_exporter_deadline_stops_process_and_cleans_workspace(exporter, capfd):
     os.environ.get("RUN_DOCKER") != "1", reason="Unpaid synthetic analysis tools check"
 )
 def test_analysis_tools_through_docker(tmp_path):
-    import asyncio
     import shlex
 
     from benchmark.tasks import Package
@@ -143,7 +143,9 @@ def test_analysis_tools_through_docker(tmp_path):
         SAFE,
         {"/workspace/probe.c": str(source)},
     )
-    task = export_task(package, tmp_path / "task", ensure_image(platform), platform)
+    task = export_task(
+        package, tmp_path / "task", asyncio.run(ensure_image(platform)), platform
+    )
     commands = [
         "set -e; command -v base64 sha256sum grep sed awk find tar file strings readelf objdump nm xxd gcc make python gdb strace "
         f"{ltrace} patchelf jq rg nc zip unzip decompile; python --version",

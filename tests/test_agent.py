@@ -374,7 +374,7 @@ def test_mocked_reviewed_web_through_native_job(tmp_path, live_mock, filtered_we
     config, replies, actor_requests = live_mock
     decisions, classifier_requests, backend = filtered_web
     platform = select_platform("any")
-    image = ensure_image(platform)
+    image = asyncio.run(ensure_image(platform))
     package = review_package(tmp_path / "package", platform.split("/")[1])
     task = export_review_task(package, tmp_path / "task", image, platform)
     backend.text = "Untrusted synthetic withheld marker."
@@ -692,7 +692,7 @@ def test_mocked_ariadne_agent_through_native_job(
 ):
     config, replies, seen = live_mock
     platform = select_platform("any")
-    image = ensure_image(platform)
+    image = asyncio.run(ensure_image(platform))
     package = review_package(tmp_path / "package", platform.split("/")[1])
     task = export_review_task(package, tmp_path / "task", image, platform)
     if case == "output_overflow":
@@ -829,7 +829,7 @@ def test_mocked_agent_output_bounds_and_timeout_cleanup(tmp_path, live_mock):
     task = export_review_task(
         review_package(tmp_path / "package", platform.split("/")[1]),
         tmp_path / "task",
-        ensure_image(platform),
+        asyncio.run(ensure_image(platform)),
         platform,
     )
     result, folder = asyncio.run(
@@ -865,7 +865,7 @@ def test_live_reviewed_web_with_synthetic_task(tmp_path):
     from dataclasses import replace
 
     platform = select_platform("any")
-    image = ensure_image(platform)
+    image = asyncio.run(ensure_image(platform))
     package = review_package(
         tmp_path / "package", platform.split("/")[1], public_answer=True
     )

@@ -82,9 +82,11 @@ the sandbox's resource and network limits. The container has no internet
 access for installing additional packages.
 
 Image inputs are pinned in `sandbox/tool-versions.env` and
-`sandbox/python/uv.lock`. The image is built once per Docker host under a tag
-that hashes those inputs. Changing the toolset requires a new experiment;
-results from different toolsets must not be pooled as one comparison.
+`sandbox/python/uv.lock`. The environment builds the shared image when a trial
+starts, and reuses it on each Docker host under a tag that hashes those
+inputs. Building counts as setup time, outside the agent's time limit.
+Changing the toolset requires a new experiment, and results from different
+toolsets must not be pooled as one comparison.
 
 ## Rewards
 

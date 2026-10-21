@@ -175,7 +175,7 @@ def test_target_seccomp_profile_is_transported_and_verified(tmp_path):
     platform = select_platform("any")
     if platform != "linux/amd64":
         pytest.skip("The target profile declares the AMD64 syscall architecture")
-    image = ensure_image(platform)
+    image = asyncio.run(ensure_image(platform))
     # Exercise Compose transport without a challenge, solver or image build.
     data = (ROOT / "tasks/pwn-02/service/seccomp.json").read_bytes()
     profile = tmp_path / "seccomp.json"
@@ -239,7 +239,7 @@ def test_target_seccomp_profile_is_transported_and_verified(tmp_path):
 @DOCKER
 def test_service_access_fresh_flags_and_separate_grading(tmp_path):
     platform = select_platform("any")
-    task = synthetic_service(tmp_path, ensure_image(platform), platform)
+    task = synthetic_service(tmp_path, asyncio.run(ensure_image(platform)), platform)
     targets = []
     read_service = "python3 -I -c " + shlex.quote(
         "import socket,pathlib; "
@@ -280,7 +280,7 @@ def test_service_access_fresh_flags_and_separate_grading(tmp_path):
 @DOCKER
 def test_service_trials_cannot_connect_to_each_other(tmp_path, monkeypatch):
     platform = select_platform("any")
-    task = synthetic_service(tmp_path, ensure_image(platform), platform)
+    task = synthetic_service(tmp_path, asyncio.run(ensure_image(platform)), platform)
     original_run = ScriptedAgent.run
 
     async def paired_trials():
@@ -357,7 +357,7 @@ def test_service_readiness_failure_prevents_agent_execution_and_cleans_up(
     tmp_path, monkeypatch
 ):
     platform = select_platform("any")
-    task = synthetic_service(tmp_path, ensure_image(platform), platform)
+    task = synthetic_service(tmp_path, asyncio.run(ensure_image(platform)), platform)
     config = Task(task).config
     config.metadata["ariadne"]["service_port"] = 4001
     (task / "task.toml").write_text(config.model_dump_toml())

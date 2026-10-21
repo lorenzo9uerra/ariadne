@@ -151,7 +151,7 @@ def test_live_config_exposes_native_agent_and_model_labels(tmp_path, model):
 @pytest.mark.parametrize("weight,milestone", [(1.0, None), (2.0, 0.0), (1.0, 0.5)])
 def test_native_job_retains_scores_and_trajectory(tmp_path, weight, milestone):
     platform = select_platform("any")
-    image = ensure_image(platform)
+    image = asyncio.run(ensure_image(platform))
     package = synthetic_package(tmp_path / "package", platform.split("/")[1])
     task = export_task(package, tmp_path / "task", image, platform)
     weights = {"task_success": weight}
