@@ -26,6 +26,7 @@ from benchmark.classifiers import (
     Classifier,
     OversizedRequest,
     load_classifiers,
+    parse_verdict,
     render_user_message,
     tokens,
     verify_route,
@@ -63,34 +64,6 @@ class FilterClassifier(Protocol):
         input the classifier comparison used (benchmark/classifiers.py).
         """
         ...
-
-
-def loads_unique(text: str):
-    """Parse JSON, rejecting objects that repeat a key."""
-
-    def unique(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"Duplicate JSON key: {key}")
-            result[key] = value
-        return result
-
-    return json.loads(text, object_pairs_hook=unique)
-
-
-def parse_verdict(raw: str) -> dict:
-    """The classifier's verdict and reason, in exactly the expected shape."""
-    result = loads_unique(raw)
-    if not isinstance(result, dict) or set(result) != {"verdict", "reason"}:
-        raise ValueError("Expected exactly verdict and reason")
-    if result["verdict"] not in ("allow", "forbidden", "uncertain"):
-        raise ValueError("Invalid classifier verdict")
-    if not isinstance(result["reason"], str) or not result["reason"].strip():
-        raise ValueError("Expected an audit reason")
-    if len(result["reason"]) > 240:
-        raise ValueError("Audit reason exceeds 240 characters")
-    return result
 
 
 class WebFilter:

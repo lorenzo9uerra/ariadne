@@ -114,18 +114,23 @@ def chat_schema() -> dict:
     }
 
 
-def parse_chat_verdict(raw: str) -> dict:
-    """Exactly a verdict and a nonblank reason of at most 240 characters."""
+def loads_unique(text: str):
+    """Parse JSON, rejecting objects that repeat a key."""
 
     def unique(pairs):
         result = {}
         for key, value in pairs:
             if key in result:
-                raise ValueError("Duplicate field")
+                raise ValueError(f"Duplicate JSON key: {key}")
             result[key] = value
         return result
 
-    result = json.loads(raw, object_pairs_hook=unique)
+    return json.loads(text, object_pairs_hook=unique)
+
+
+def parse_verdict(raw: str) -> dict:
+    """Exactly a verdict and a nonblank reason of at most 240 characters."""
+    result = loads_unique(raw)
     if not isinstance(result, dict) or set(result) != {"verdict", "reason"}:
         raise ValueError("Expected exactly verdict and reason")
     if result["verdict"] not in VERDICTS:
@@ -214,7 +219,7 @@ class Classifier:
         choice = data["choices"][0]
         if choice.get("finish_reason") == "length":
             raise ValueError("Truncated output")
-        return (self.parse or parse_chat_verdict)(choice["message"]["content"])
+        return (self.parse or parse_verdict)(choice["message"]["content"])
 
     async def classify(
         self,

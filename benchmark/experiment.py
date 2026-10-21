@@ -531,12 +531,9 @@ async def _replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
     if item is None or type(slot) is not int or not 1 <= slot <= item["attempts"]:
         raise ValueError("Unknown planned job or attempt slot")
     with journal(folder) as (events, append):
+        ended = {event["job"] for event in events if event["event"] == "job_ended"}
         if any(
-            event["event"] == "job_started"
-            and not any(
-                end["event"] == "job_ended" and end["job"] == event["job"]
-                for end in events
-            )
+            event["event"] == "job_started" and event["job"] not in ended
             for event in events
         ):
             raise ValueError("Wait for running jobs to finish before replacement")

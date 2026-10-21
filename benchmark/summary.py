@@ -180,15 +180,13 @@ def score_run(item: dict, selected: list) -> dict:
         for row in selected
     )
     run["raw_complete"] = raw_complete
-    if raw_complete:
+    if raw_complete or complete:
         run["raw_pass_at_1"] = sum(row["raw_solve"] for row in selected) / len(selected)
         run["raw_any_success"] = int(any(row["raw_solve"] for row in selected))
     if complete:
         count = len(selected)
         run.update(
-            raw_pass_at_1=sum(row["raw_solve"] for row in selected) / count,
             clean_pass_at_1=sum(row["clean_solve"] for row in selected) / count,
-            raw_any_success=int(any(row["raw_solve"] for row in selected)),
             clean_any_success=int(any(row["clean_solve"] for row in selected)),
             components={
                 key: sum((row["components"] or {}).get(key, 0) for row in selected)

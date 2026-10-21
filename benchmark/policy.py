@@ -10,10 +10,10 @@ from contextvars import ContextVar
 
 from benchmark.audit import AuditTrail
 from benchmark.budgets import Counters
+from benchmark.classifiers import loads_unique
 from benchmark.web_filter import (
     FilterClassifier,
     WebFilter,
-    loads_unique,
     names_blocked_repository,
 )
 
@@ -258,11 +258,9 @@ async def execute_benchmark_tools(
     finally:
         # Mark calls that never got a result, for example when the attempt
         # stopped partway through the batch, so the audit has no gaps.
+        returned = {result["tool_call_id"] for result in results}
         for call in calls:
-            if not any(
-                item["stage"] == "tool_result" and item["call_id"] == call["id"]
-                for item in session.audit.items
-            ):
+            if call["id"] not in returned:
                 session.audit.record(
                     "unreturned",
                     call["id"],
