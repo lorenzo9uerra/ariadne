@@ -23,11 +23,11 @@ rate_limit_retry_initial_seconds = 30
 rate_limit_retry_max_seconds = 120
 
 [budgets]
-total_tool_calls = 60 # Excludes submit; rejected, failed, and malformed non-submit calls count.
+total_tool_calls = 120 # Excludes submit; rejected, failed, and malformed non-submit calls count.
 web_calls = 10
 agent_max_output_tokens = 16384 # Artificial Analysis default for non-reasoning models; reasoning models use their provider maximum.
-agent_turns = 60
-elapsed_seconds = 1800
+agent_turns = 120
+elapsed_seconds = 3600
 provider_wait_seconds = 900 # API retry waits (rate limits, server errors) that do not count against elapsed_seconds.
 bash_timeout_seconds = 90
 filter_calls = 20
