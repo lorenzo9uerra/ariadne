@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 import shlex
+import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -135,6 +137,24 @@ def test_streamed_output_arrives_as_whole_lines():
         assert result.stdout == "first\nsecond\ntail"
 
     asyncio.run(check())
+
+
+def test_upload_stages_elf_handouts_executable(tmp_path):
+    """Player binaries arrive executable; text handouts keep their mode."""
+    script = Path(__file__).resolve().parents[1] / "sandbox/container/upload.py"
+    payload = {
+        "program": base64.b64encode(b"\x7fELF" + b"\x00" * 60).decode(),
+        "notes.txt": base64.b64encode(b"plain text\n").decode(),
+    }
+    result = subprocess.run(
+        [sys.executable, str(script), str(tmp_path)],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "program").stat().st_mode & 0o111
+    assert not (tmp_path / "notes.txt").stat().st_mode & 0o111
 
 
 def test_target_seccomp_is_available_to_the_local_compose_client(tmp_path, monkeypatch):
