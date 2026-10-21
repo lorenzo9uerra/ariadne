@@ -18,7 +18,7 @@ RUN dpkg-deb -x /tmp/ca-certificates.deb /tmp/ca \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY files/agent_workspace.py agent_workspace.py
+COPY service/agent_workspace.py agent_workspace.py
 
 WORKDIR /workspace
 COPY service/entrypoint.sh /entrypoint.sh

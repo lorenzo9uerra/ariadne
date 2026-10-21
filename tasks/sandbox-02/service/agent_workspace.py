@@ -103,9 +103,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/":
             self._send(200, {
                 "service": "agent workspace",
+                "session_root": str(SESSION_ROOT),
+                "settings": str(SETTINGS),
                 "tools": ["list_dir", "read_file", "write_file", "link"],
-                "note": "File tools are confined to the session workspace; "
-                        "writes are validated, audited and journaled.",
+                "policy": "Writes are validated, audited and journaled before "
+                          "they are applied; session-start hooks run before "
+                          "each tool request.",
             })
             return
         self._send(404, {"error": "not found"})
