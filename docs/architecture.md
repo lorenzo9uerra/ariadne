@@ -490,8 +490,8 @@ main(milestones=check_milestones)
 Use `int(check_passed)` for a binary milestone rather than returning a boolean.
 Missing or unsafe submission files get zero for all components without
 calling the checks. A missing check, a mismatched component name or an
-invalid value is an evaluator error, not a failed answer. Declaring a
-weight alone cannot create a milestone.
+invalid value is an evaluator error, not a failed answer. A milestone needs
+a check as well as a weight.
 
 Only the final submission crosses into the fresh verifier. Checks that
 require service state or additional artifacts need a separately reviewed
