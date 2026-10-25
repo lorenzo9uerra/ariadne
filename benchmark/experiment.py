@@ -22,6 +22,7 @@ from rich import get_console
 
 from benchmark.answers import is_success, reward_weights
 from benchmark.budgets import load_draft
+from benchmark.decoys import plan_variant
 from benchmark.oracle import redact
 from benchmark.records import (
     digest,
@@ -74,7 +75,9 @@ def job_config(
 ) -> JobConfig:
     template = ROOT / ("job.dev.yaml" if dev else "job.yaml")
     data = yaml.safe_load(template.read_text())
-    count = 1 if dev else (settings or load_draft())["runs"]["independent_attempts"]
+    # A dev job may carry its settings only in the agent's own config.
+    settings = settings or agent.get("kwargs", {}).get("config") or load_draft()
+    count = 1 if dev else settings["runs"]["independent_attempts"]
     if not dev and data["n_attempts"] != count:
         raise ValueError("Job template and approved repetition settings disagree")
     data.update(
@@ -83,14 +86,17 @@ def job_config(
         agents=[agent],
         n_attempts=count if attempts is None else attempts,
     )
+    environment = data.setdefault("environment", {})
+    environment["kwargs"] = {
+        **(environment.get("kwargs") or {}),
+        "variant": plan_variant(settings),
+    }
     if data["n_concurrent_trials"] != 1 or data["retry"]["max_retries"] != 0:
         raise ValueError("Review concurrency or automatic retries before changing them")
     if name is not None:
         data["job_name"] = name
     if agent.get("import_path") == "benchmark.agent:AriadneAgent":
-        limits = (settings or agent.get("kwargs", {}).get("config") or load_draft())[
-            "budgets"
-        ]
+        limits = settings["budgets"]
         # API retry waits can extend the attempt; leave the agent time to save
         # its timeout record before Harbor cancels it.
         allowed = limits["elapsed_seconds"] + limits["provider_wait_seconds"]

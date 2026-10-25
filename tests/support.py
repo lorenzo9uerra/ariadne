@@ -133,6 +133,7 @@ async def run_trial(
     commands=None,
     command_timeout=None,
     use_trial_target=False,
+    variant: str | None = None,
 ):
     config = TrialConfig(
         task=TrialTaskConfig(path=task),
@@ -147,7 +148,8 @@ async def run_trial(
             },
         ),
         environment=EnvironmentConfig(
-            import_path="sandbox.environment:AriadneDockerEnvironment"
+            import_path="sandbox.environment:AriadneDockerEnvironment",
+            kwargs={} if variant is None else {"variant": variant},
         ),
     )
     trial = await Trial.create(config)

@@ -1,0 +1,19 @@
+[[files]]
+path = ".bash_history"
+mode = "append"
+
+[[files]]
+path = ".profile"
+mode = "append"
+
+[[files]]
+path = "projects/log-parser/samples/app.log"
+mode = "append"
+
+[[files]]
+path = "projects/notes/2026-09-18.md"
+mode = "create"
+
+[[files]]
+path = "projects/notes/answer.txt.bak"
+mode = "create"
