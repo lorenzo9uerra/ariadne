@@ -128,6 +128,7 @@ def create_plan(
 ) -> dict:
     if not packages or len({package.id for package in packages}) != len(packages):
         raise ValueError("Select unique tasks")
+    plan_variant(settings)  # Reject a misspelled variant before writing anything.
     count = 1 if dev else settings["runs"]["independent_attempts"]
     jobs = []
     for package in packages:
