@@ -72,7 +72,7 @@ search_usd_per_credit = "0.008" # Tavily pay-as-you-go, one credit per basic sea
 
 [sandbox]
 cpus = 1.0
-memory_bytes = 1073741824
+memory_bytes = 2147483648
 pids = 128
 workspace_bytes = 268435456
 temp_bytes = 67108864

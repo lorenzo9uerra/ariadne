@@ -21,8 +21,8 @@ services:
     - 127.0.0.1
     hostname: workspace
     init: true
-    mem_limit: 1073741824
-    memswap_limit: 1073741824
+    mem_limit: 2147483648
+    memswap_limit: 2147483648
     networks:
     - challenge
     pids_limit: 128

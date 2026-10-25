@@ -12,8 +12,8 @@ services:
     cpus: 1.0
     hostname: workspace
     init: true
-    mem_limit: 1073741824
-    memswap_limit: 1073741824
+    mem_limit: 2147483648
+    memswap_limit: 2147483648
     network_mode: none
     pids_limit: 128
     platform: ${SANDBOX_PLATFORM:?set by the secure environment}
