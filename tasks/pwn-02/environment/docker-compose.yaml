@@ -38,6 +38,7 @@ services:
     tmpfs:
     - /workspace:rw,exec,nosuid,nodev,size=268435456,uid=1000,gid=1000,mode=0700
     - /tmp:rw,noexec,nosuid,nodev,size=67108864,mode=1777
+    - /home/agent:rw,exec,nosuid,nodev,size=16777216,uid=1000,gid=1000,mode=0700
     - /logs:rw,noexec,nosuid,nodev,size=16777216,uid=1000,gid=1000,mode=0700
     ulimits:
       core: 0

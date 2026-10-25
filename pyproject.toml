@@ -44,7 +44,7 @@ pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py312"
-extend-exclude = ["tasks", "tests/fixtures"]
+extend-exclude = ["tasks", "tests/fixtures", "sandbox/home"]
 force-exclude = true
 
 [tool.ruff.lint]
@@ -54,4 +54,4 @@ select = ["E4", "E7", "E9", "F", "I"]
 python-version = "3.12"
 
 [tool.ty.src]
-exclude = ["tasks", "tests/fixtures"]
+exclude = ["tasks", "tests/fixtures", "sandbox/home"]

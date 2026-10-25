@@ -434,7 +434,7 @@ never truncated to fit.
 | Bash command | 90 seconds | Process tree killed, agent continues |
 | Bash output | 64 KiB per stream | Truncated, recorded |
 | CPU / RAM / processes | 1 CPU / 1 GiB / 128 PIDs | — |
-| Storage | 256 MiB workspace, 64 MiB temp, no host mounts | — |
+| Storage | 256 MiB workspace, 64 MiB temp, 16 MiB home, no host mounts | — |
 | Concurrent attempts | 1 | — |
 
 ### 9.5 Accounting

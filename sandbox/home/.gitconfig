@@ -1,0 +1,7 @@
+[user]
+	name = Alex Mercer
+	email = alex@localhost
+[init]
+	defaultBranch = main
+[pull]
+	rebase = true

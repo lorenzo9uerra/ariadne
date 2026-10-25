@@ -43,6 +43,7 @@ from benchmark.policy import Session, execute_benchmark_tools
 from benchmark.tasks import ROOT, Package, package_path
 from benchmark.web import HTTPReply, SearchHit, web_fetch, web_search
 from benchmark.web_filter import ClassifierReply
+from sandbox.checks import HOME, HOME_BYTES
 from sandbox.environment import LOG_BYTES
 
 # The declared profile tests use wherever an agent route is needed.
@@ -409,6 +410,7 @@ def export_task(package: Package, destination: Path, image: str, platform: str) 
     service["tmpfs"] = [
         f"/workspace:rw,exec,nosuid,nodev,size={limits['workspace_bytes']},uid=1000,gid=1000,mode=0700",
         f"/tmp:rw,noexec,nosuid,nodev,size={limits['temp_bytes']},mode=1777",
+        f"{HOME}:rw,exec,nosuid,nodev,size={HOME_BYTES},uid=1000,gid=1000,mode=0700",
         f"/logs:rw,noexec,nosuid,nodev,size={LOG_BYTES},uid=1000,gid=1000,mode=0700",
     ]
     (environment / "docker-compose.yaml").write_text(

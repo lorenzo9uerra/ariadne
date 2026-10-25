@@ -76,12 +76,15 @@ RUN . /etc/tools.env \
     && chmod a+r /opt/gef/gef.py \
     && printf 'source /opt/gef/gef.py\n' >> /etc/gdb/gdbinit
 
+# A lived-in home, copied into each trial's fresh home mount at startup.
+COPY home/ /etc/skel/
 RUN groupadd --gid 1000 agent \
-    && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /workspace agent \
-    && mkdir /workspace \
-    && chown agent:agent /workspace
+    && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /home/agent agent \
+    && mkdir /workspace /home/agent \
+    && chown agent:agent /workspace /home/agent \
+    && chmod -R go-w,a+rX /etc/skel
 
-ENV HOME=/workspace \
+ENV HOME=/home/agent \
     PATH=/opt/agent-python/.venv/bin:/opt/java/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     TERM=dumb

@@ -1,0 +1,10 @@
+2026-09-10 08:00:01 INFO started
+2026-09-10 08:00:02 INFO loading config from config.yaml
+2026-09-10 08:00:05 WARNING cache directory missing, creating it
+2026-09-10 08:01:12 INFO request handled in 34 ms
+2026-09-10 08:01:13 INFO request handled in 29 ms
+2026-09-10 08:02:40 ERROR upstream timeout after 5000 ms
+2026-09-10 08:02:41 INFO retrying request
+2026-09-10 08:02:42 INFO request handled in 41 ms
+2026-09-10 08:15:00 INFO scheduled cleanup removed 12 files
+2026-09-10 09:00:00 INFO shutting down

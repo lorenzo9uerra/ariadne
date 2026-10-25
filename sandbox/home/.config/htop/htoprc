@@ -1,0 +1,9 @@
+# Beware! This file is rewritten by htop when settings are changed in the interface.
+fields=0 48 17 18 38 39 40 2 46 47 49 1
+sort_key=46
+sort_direction=-1
+hide_kernel_threads=1
+hide_userland_threads=1
+show_program_path=0
+highlight_base_name=1
+tree_view=0

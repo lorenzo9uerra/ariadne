@@ -96,6 +96,10 @@ class Controls:
 
 
 EPHEMERAL_MOUNTS = {"/workspace", "/tmp"}
+# The agent's container also gets an in-memory home, outside the task's
+# workspace.
+HOME = "/home/agent"
+HOME_BYTES = 16 * 1024 * 1024
 
 
 def tmpfs_size(options: str) -> int | None:
@@ -154,8 +158,13 @@ def container_checks(
     expected_limits: dict | None,
     hostname: str = "workspace",
     networked: bool = False,
+    home: bool = False,
 ) -> dict:
-    """Whether a container's controls match the sandbox policy, check by check."""
+    """Whether a container's controls match the sandbox policy, check by check.
+
+    `home` is set for the agent's container, which also mounts the user's home.
+    """
+    mounts = (EPHEMERAL_MOUNTS | {HOME}) if home else EPHEMERAL_MOUNTS
     checks = {
         "fixed_nonroot_user": controls.user == "1000:1000",
         "unprivileged": not controls.privileged,
@@ -165,11 +174,8 @@ def container_checks(
         "no_host_namespaces": "host" not in controls.namespaces.values(),
         "root_filesystem_read_only": controls.read_only_root,
         "only_ephemeral_mounts": not controls.bind_mounts
-        and set(controls.tmpfs) == EPHEMERAL_MOUNTS
-        and all(
-            kind == "tmpfs" and path in EPHEMERAL_MOUNTS
-            for kind, path in controls.mounts
-        ),
+        and set(controls.tmpfs) == mounts
+        and all(kind == "tmpfs" and path in mounts for kind, path in controls.mounts),
         "no_published_ports": not controls.has_published_ports,
         "memory_bounded_without_extra_swap": controls.memory_bytes > 0
         and controls.memory_and_swap_bytes == controls.memory_bytes,
@@ -188,6 +194,8 @@ def container_checks(
             configured_temp=controls.tmpfs.get("/tmp") == expected_limits["temp_bytes"],
             neutral_hostname=controls.hostname == hostname,
         )
+    if home:
+        checks["configured_home"] = controls.tmpfs.get(HOME) == HOME_BYTES
     if not networked:
         checks["network_disabled"] = controls.network == "none"
         return checks
