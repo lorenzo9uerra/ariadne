@@ -160,7 +160,7 @@ def test_native_job_retains_scores_and_trajectory(tmp_path, weight, milestone):
         program = (
             "import sys; sys.path.insert(0, '/tests'); "
             "from benchmark.verifier import main; "
-            f"main(milestones=lambda text: {{'parsed_record': {milestone!r}}})"
+            f"main(milestones=lambda text, expected: {{'parsed_record': {milestone!r}}})"
         )
         (task / "tests/test.sh").write_text(
             "#!/bin/sh\nset -eu\nexec python3 -I -c " + shlex.quote(program) + "\n"
