@@ -90,6 +90,14 @@ def validate_url(url: str, max_chars: int) -> str:
     return host
 
 
+def is_valid_url(url: str, max_chars: int) -> bool:
+    try:
+        validate_url(url, max_chars)
+    except ValueError:
+        return False
+    return True
+
+
 def validate_addresses(addresses: list[str]) -> tuple[str, ...]:
     if not addresses:
         raise ValueError("No resolved addresses")
@@ -196,17 +204,20 @@ def web_search(session: Session, backend: Backend):
                 for hit in hits
                 if not blocked_domain(hit.url, limits.get("blocked_domains", []))
             ]
-            selected = allowed[: limits["search_results"]]
-            result = []
-            for hit in selected:
-                validate_url(hit.url, limits["url_chars"])
-                result.append(
-                    {
-                        "title": hit.title[: limits["title_chars"]],
-                        "url": hit.url,
-                        "snippet": hit.snippet[: limits["snippet_chars"]],
-                    }
-                )
+            # So are results whose URL the agent could not fetch, rather than
+            # failing the whole search for one bad result.
+            valid = [
+                hit for hit in allowed if is_valid_url(hit.url, limits["url_chars"])
+            ]
+            selected = valid[: limits["search_results"]]
+            result = [
+                {
+                    "title": hit.title[: limits["title_chars"]],
+                    "url": hit.url,
+                    "snippet": hit.snippet[: limits["snippet_chars"]],
+                }
+                for hit in selected
+            ]
         except Exception as error:
             return safe_error(session, error)
         candidate = json.dumps(result, ensure_ascii=False)
@@ -216,7 +227,8 @@ def web_search(session: Session, backend: Backend):
             urls=[hit.url for hit in selected],
             source_results=[hit.__dict__ for hit in selected],
             blocked_results=len(hits) - len(allowed),
-            truncated=len(allowed) > len(selected)
+            invalid_results=len(allowed) - len(valid),
+            truncated=len(valid) > len(selected)
             or any(
                 len(hit.title) > limits["title_chars"]
                 or len(hit.snippet) > limits["snippet_chars"]
