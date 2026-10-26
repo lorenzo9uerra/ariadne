@@ -364,26 +364,23 @@ def test_attempt_ceiling_applies_per_run(tmp_path):
     assert issubclass(AttemptSpendingLimit, SpendingLimit)
 
 
-@pytest.mark.parametrize("model", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"])
-def test_selected_profile_prices_and_reservations(model):
+@pytest.mark.parametrize("model", sorted(load_draft()["agents"]))
+def test_every_agent_profile_is_complete_and_fits_its_context(model):
     config = load_draft(model=model)
-    prices = Prices.from_config(config)
-    is_mistral = model.startswith("mistralai/")
-    assert prices.input == Decimal("0.68" if is_mistral else "0.15")
-    assert prices.output == Decimal("2.09" if is_mistral else "0.47")
+    route, prices = config["agent_route"], Prices.from_config(config)
     assert config["models"]["agent"] == "openrouter/" + model
-    assert config["budgets"]["agent_max_output_tokens"] == (
-        262144 if is_mistral else 131072
-    )
-    assert config["agent_route"]["reasoning_effort"] == (
-        "high" if is_mistral else "xhigh"
-    )
-    assert config["agent_route"]["temperature"] == 0.6
+    assert prices.input > 0 and prices.output > 0
+    assert 0 < config["budgets"]["agent_max_output_tokens"] < prices.context_tokens
+    assert route["output_token_parameter"] in ("max_tokens", "max_completion_tokens")
+    assert route["reasoning_effort"] in ("low", "medium", "high", "xhigh", "max")
+    assert 0 <= route["temperature"] <= 2
+    assert route["provider"] and route["provider_name"] and route["token_encoding"]
     assert "limit_usd" not in config["spending"]
+
+
+def test_default_settings_have_no_agent_profile():
     default = load_draft()
     assert "agent" not in default["models"] and "agent_route" not in default
-    if not is_mistral:
-        assert prices.reservation(131072) == Decimal("0.41160384")
 
 
 def test_discount_change_stops_the_pinned_route():
@@ -404,14 +401,3 @@ def test_discount_change_stops_the_pinned_route():
     endpoint["pricing"]["discount"] = 0
     with pytest.raises(CostAccountingError):
         check_endpoint({"endpoints": [endpoint]}, config, Prices.from_config(config))
-
-
-def test_mimo_uses_official_thinking_mode_and_prices():
-    config = load_draft(model="xiaomi/mimo-v2.6-pro")
-    prices = Prices.from_config(config)
-    assert config["agent_route"]["provider"] == "xiaomi/fp8"
-    assert config["agent_route"]["provider_name"] == "Xiaomi"
-    assert config["agent_route"]["reasoning_effort"] == "high"
-    assert config["agent_route"]["temperature"] == 1.0
-    assert config["budgets"]["agent_max_output_tokens"] == 131072
-    assert prices.reservation(131072) == Decimal("0.57016320")

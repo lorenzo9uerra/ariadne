@@ -202,7 +202,10 @@ def live_fetch(
 
 
 def test_model_classifier_is_the_configured_classifier(tmp_path):
+    # Changing it needs a new comparison (docs/classifier_selection.md).
     assert load_draft()["models"]["web_filter"] == "deepseek-flash"
+    # Contamination labels come from a different model (protocol section 13.2).
+    assert load_draft()["autoreview"]["labelling_model"] != "deepseek-flash"
     ledger = Ledger(tmp_path / "ledger.sqlite3", "10")
     classifier = web_filter.filter_classifier(load_draft(), ledger, "k", "r")
     assert classifier.model.settings["model"] == "deepseek/deepseek-v4.1-flash"
