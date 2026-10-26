@@ -20,7 +20,8 @@ class FakeAgent:
         self.commands.append(command)
         outcome = self.outcomes.pop(0) if self.outcomes else False
         if outcome == "timeout":
-            raise TimeoutError
+            # How Harbor's Docker environment reports a command timeout.
+            raise RuntimeError("Command timed out after 5 seconds")
         return SimpleNamespace(return_code=0 if outcome else 1)
 
 

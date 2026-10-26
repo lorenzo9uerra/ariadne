@@ -29,8 +29,9 @@ class AuditTrail:
 
     def publish(self, item: dict) -> None:
         # Append each record to the audit file on the host, out of the agent's reach.
-        snapshot = json.loads(json.dumps(item, ensure_ascii=False, allow_nan=False))
+        # Serialize even without a file, so an unrecordable item fails early.
+        line = json.dumps(item, ensure_ascii=False, allow_nan=False) + "\n"
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as output:
-                output.write(json.dumps(snapshot, ensure_ascii=False) + "\n")
+                output.write(line)

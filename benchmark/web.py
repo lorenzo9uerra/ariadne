@@ -253,7 +253,8 @@ def web_fetch(session: Session, backend: Backend):
             "web_fetch",
             candidate,
             response_url=page["url"],
-            urls=[page["url"], *(hop["url"] for hop in page["redirect_chain"])],
+            # Every hop, the final page included.
+            urls=[hop["url"] for hop in page["redirect_chain"]],
             url=page["url"],
             raw_text=page["raw_text"],
             redirect_chain=page["redirect_chain"],

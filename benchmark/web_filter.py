@@ -400,7 +400,7 @@ def blocked_repository(url: str, repositories: list[str]) -> bool:
     """
     try:
         parts = urlsplit(url.strip())
-        host = (parts.hostname or "").lower()
+        host = (parts.hostname or "").lower().rstrip(".")
     except ValueError:
         return False
     path = parts.path.lower().strip("/")

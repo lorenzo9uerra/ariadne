@@ -1094,8 +1094,9 @@ def test_pending_billing_does_not_bypass_failed_isolation(tmp_path):
         experiment.check_result(row)
 
 
+@pytest.mark.parametrize("status", ["http_error", "transport_error"])
 def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, status
 ):
     audit = tmp_path / "private/audit.jsonl"
     audit.parent.mkdir()
@@ -1104,7 +1105,7 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
             {
                 "stage": "model_request",
                 "call_id": "synthetic",
-                "status": "http_error",
+                "status": status,
                 "retry_wait_seconds": 120,
             }
         )

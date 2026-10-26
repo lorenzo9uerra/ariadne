@@ -27,7 +27,8 @@ async def wait_for_service(environment, target_id: str, port: int) -> float:
                 timeout_sec=5,
             )
             ready = probe.return_code == 0
-        except TimeoutError:
+        except RuntimeError:
+            # Harbor reports a command that outlives its timeout as a RuntimeError.
             ready = False
         if ready:
             return round(time.monotonic() - started, 2)
@@ -124,7 +125,7 @@ def docker_controls(details: dict) -> Controls:
             for option in security_options
         ),
         custom_seccomp=any(
-            option.startswith("seccomp=") for option in security_options
+            option.startswith(("seccomp=", "seccomp:")) for option in security_options
         ),
         namespaces={
             field: host.get(field) or ""

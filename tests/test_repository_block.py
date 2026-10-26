@@ -21,6 +21,8 @@ REPOS = ["lorenzo9uerra/ariadne"]
         "https://codeload.github.com/lorenzo9uerra/ariadne/zip/refs/heads/main",
         "https://api.github.com/repos/lorenzo9uerra/ariadne/contents/challenges",
         "https://lorenzo9uerra.github.io/ariadne/",
+        "https://GitHub.com./lorenzo9uerra/ariadne/blob/main/README.md",
+        "https://lorenzo9uerra.github.io./ariadne/",
     ],
 )
 def test_every_form_of_the_repository_is_blocked(url):

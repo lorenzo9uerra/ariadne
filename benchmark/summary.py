@@ -72,7 +72,11 @@ def retry_interruption(row):
         if entry.get("stage") == "model_request":
             requests[entry["call_id"]] = entry
     last = list(requests.values())[-1] if requests else {}
-    return last.get("status") == "http_error" and last.get("retry_wait_seconds", 0) > 0
+    # Both failed responses and connection failures are retried after a wait.
+    return (
+        last.get("status") in ("http_error", "transport_error")
+        and last.get("retry_wait_seconds", 0) > 0
+    )
 
 
 def metrics(item: dict) -> tuple[str, ...]:
@@ -434,8 +438,9 @@ def overall_scores(runs: list[dict], complete: bool) -> dict:
         "category_scores": {
             category: mean_scores([run for run in runs if run["category"] == category])
             for category in sorted({run["category"] for run in runs})
-            if complete
-        },
+        }
+        if complete
+        else {},
     }
 
 

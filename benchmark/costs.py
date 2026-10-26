@@ -53,6 +53,13 @@ def microdollars(value: object) -> int:
 # runs: it holds every reservation and charge across experiments.
 SPEND_LEDGER = Path("logs/spending.sqlite3")
 
+# What each request commits against a limit: its charge once settled, nothing
+# for an expected-unbilled rejection, and otherwise its whole reservation.
+COMMITTED = (
+    "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
+    "'expected_unbilled' THEN 0 ELSE reserved END)), 0) FROM requests"
+)
+
 
 class Ledger:
     """Every paid request's reservation and charge, with any local spending limits.
@@ -106,19 +113,13 @@ class Ledger:
         request_id = uuid4().hex
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            committed = db.execute(
-                "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
-                "'expected_unbilled' THEN 0 ELSE reserved END)), 0) FROM requests"
-            ).fetchone()[0]
+            committed = db.execute(COMMITTED).fetchone()[0]
             if self.limit is not None and committed + reserved > self.limit:
                 raise SpendingLimit("Local spending allowance exhausted")
             if self.attempt_limit is not None:
-                spent = db.execute(
-                    "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
-                    "'expected_unbilled' THEN 0 ELSE reserved END)), 0) "
-                    "FROM requests WHERE run_id=?",
-                    (run_id,),
-                ).fetchone()[0]
+                (spent,) = db.execute(
+                    COMMITTED + " WHERE run_id=?", (run_id,)
+                ).fetchone()
                 if spent + reserved > self.attempt_limit:
                     raise AttemptSpendingLimit("Attempt spending ceiling reached")
             db.execute(
@@ -187,10 +188,7 @@ class Ledger:
                 query + (" WHERE run_id=?" if run_id is not None else ""),
                 (run_id,) if run_id is not None else (),
             ).fetchone()
-            committed = db.execute(
-                "SELECT COALESCE(SUM(COALESCE(billed, CASE WHEN status="
-                "'expected_unbilled' THEN 0 ELSE reserved END)), 0) FROM requests"
-            ).fetchone()[0]
+            committed = db.execute(COMMITTED).fetchone()[0]
         return {
             "billed_usd": billed / 1_000_000,
             "held_usd": held / 1_000_000,
@@ -322,13 +320,14 @@ def check_endpoint(data: dict, config: dict, prices: Prices) -> None:
 
 
 def routing(config: dict) -> dict:
+    prices = Prices.from_config(config)
     return {
         "only": [config["agent_route"]["provider"]],
         "allow_fallbacks": False,
         "require_parameters": True,
         "max_price": {
-            "prompt": float(Prices.from_config(config).input),
-            "completion": float(Prices.from_config(config).output),
+            "prompt": float(prices.input),
+            "completion": float(prices.output),
         },
     }
 
