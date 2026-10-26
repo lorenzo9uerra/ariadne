@@ -1,4 +1,8 @@
-"""Per-attempt quota accounting. No awaits occur while reserving a quota."""
+"""The approved settings, their limit overrides, and an attempt's clock and counters.
+
+The counters never await, so two tool calls can't both take the last unit of
+a budget.
+"""
 
 import asyncio
 import copy
@@ -10,7 +14,7 @@ from pathlib import Path
 
 
 class BudgetExceeded(RuntimeError):
-    pass
+    """A budget is spent; the message names it."""
 
 
 class AttemptClock:
@@ -33,8 +37,7 @@ class AttemptClock:
         granted = max(0.0, min(seconds, self.allowance - self.excluded))
         self.excluded += granted
         self.deadline += granted
-        when = self.timeout.when() if self.timeout is not None else None
-        if granted and self.timeout is not None and when is not None:
+        if granted and self.timeout and (when := self.timeout.when()) is not None:
             self.timeout.reschedule(when + granted)
 
 

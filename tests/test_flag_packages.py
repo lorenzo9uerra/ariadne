@@ -407,7 +407,7 @@ def test_empty_static_directory_is_rejected(tmp_path):
             "sha256 = {}\n"
         )
     )
-    with pytest.raises(ValueError, match="no static player artifacts"):
+    with pytest.raises(ValueError, match="files/ is empty"):
         load_package(root)
 
 

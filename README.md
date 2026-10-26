@@ -142,7 +142,7 @@ Neither solved the task; both ran out of context before time.
 GitHub Actions runs Ruff, ty and the test suite on pushes to `main` and pull
 requests. The default suite uses scripted models and synthetic tasks, with no
 paid API calls. Setting `RUN_DOCKER=1` adds the tests that build images and
-start containers, and `RUN_LIVE=1` adds two synthetic checks against paid
+start containers, and `RUN_LIVE=1` adds one synthetic check against the paid
 providers.
 
 ## Training data

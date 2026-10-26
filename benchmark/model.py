@@ -1,4 +1,5 @@
-"""OpenRouter completions with a reservation for every physical API request."""
+"""The agent's model: OpenRouter completions, each request funded by a reservation
+in the spending ledger before it is sent."""
 
 import asyncio
 import copy
@@ -38,6 +39,10 @@ class RetryableAPIError(ModelAPIError):
 
 
 def retry_after(value: str | None) -> float | None:
+    """The seconds a Retry-After header asks for, given as seconds or as a date.
+
+    None when the header is missing or invalid; a date in the past means 0.
+    """
     if value is None:
         return None
     try:
@@ -74,46 +79,49 @@ def pre_inference_rejection(response: httpx.Response) -> bool:
         return False
 
 
+def redact_credentials(value: object, api_key: str) -> str:
+    """The value as text of at most 2048 characters, with any API keys removed."""
+    text = str(value).replace(api_key, "[redacted]") if api_key else str(value)
+    text = re.sub(r"\b(?:sk-or-v1-|sk-|tvly-)[\w-]+", "[redacted]", text)
+    text = re.sub(r"(?i)Bearer\s+\S+", "Bearer [redacted]", text)
+    return text[:2048]
+
+
+# The fields of an OpenRouter error's metadata worth keeping for diagnosis.
+ERROR_METADATA = (
+    "provider_name",
+    "provider_code",
+    "error_type",
+    "raw",
+    "limit_source",
+    "reason",
+    "remedy_hint",
+)
+
+
+def api_error(data: object, api_key: str) -> dict:
+    """The error fields of a response body, without credentials."""
+    error = data.get("error") if isinstance(data, dict) else None
+    error = error if isinstance(error, dict) else {}
+    metadata = error.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    fields = {"code": error.get("code"), "message": error.get("message")}
+    fields |= {key: metadata.get(key) for key in ERROR_METADATA}
+    return {
+        key: redact_credentials(value, api_key)
+        for key, value in fields.items()
+        if value is not None
+    }
+
+
 def error_details(response: httpx.Response, api_key: str) -> dict:
-    """Keep diagnostic fields and correlation IDs, without credentials."""
-
-    def clean(value):
-        text = str(value).replace(api_key, "[redacted]") if api_key else str(value)
-        text = re.sub(r"\b(?:sk-or-v1-|sk-|tvly-)[\w-]+", "[redacted]", text)
-        text = re.sub(r"(?i)Bearer\s+\S+", "Bearer [redacted]", text)
-        return text[:2048]
-
+    """An error response's diagnostic fields and request IDs, without credentials."""
     try:
         data = response.json() if len(response.content) <= 16384 else {}
     except ValueError:
         data = {}
     data = data if isinstance(data, dict) else {}
-    error = data.get("error", {})
-    error = error if isinstance(error, dict) else {}
-    metadata = error.get("metadata", {})
-    metadata = metadata if isinstance(metadata, dict) else {}
-    details: dict = {
-        "api_error": {
-            k: clean(v)
-            for k, v in {
-                "code": error.get("code"),
-                "message": error.get("message"),
-                **{
-                    k: metadata.get(k)
-                    for k in (
-                        "provider_name",
-                        "provider_code",
-                        "error_type",
-                        "raw",
-                        "limit_source",
-                        "reason",
-                        "remedy_hint",
-                    )
-                },
-            }.items()
-            if v is not None
-        }
-    }
+    details: dict = {"api_error": api_error(data, api_key)}
     identifiers = [response.headers.get("X-Generation-Id"), data.get("id")]
     identifiers = [
         v
@@ -124,7 +132,7 @@ def error_details(response: httpx.Response, api_key: str) -> dict:
         details["generation_id"] = identifiers[0]
     request_id = response.headers.get("X-Request-Id")
     if request_id:
-        details["provider_request_id"] = clean(request_id)
+        details["provider_request_id"] = redact_credentials(request_id, api_key)
     delay = retry_after(response.headers.get("Retry-After"))
     if delay is not None:
         details["retry_after_seconds"] = delay
@@ -137,7 +145,7 @@ def input_tokens(
     model: str,
     encoding_name: str | None = None,
 ) -> int:
-    """Estimate this request, without truncating history or imposing a run token cap."""
+    """Estimate a request's input tokens. The history is never trimmed to fit."""
     try:
         encoding = (
             tiktoken.get_encoding(encoding_name)
@@ -147,8 +155,8 @@ def input_tokens(
     except (KeyError, ValueError):
         raise CostAccountingError("The model needs a reviewed tokenizer") from None
     text = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
-    # Tool/message framing is an estimate. Provider context validation remains
-    # authoritative; the spending hold uses the whole verified context window.
+    # The per-message overhead is a guess. The provider still rejects a request
+    # that is too long, and the spending hold covers the whole context window.
     return len(encoding.encode(text, disallowed_special=())) + 32 * len(messages) + 128
 
 
@@ -188,7 +196,7 @@ class OpenRouterModel:
         )
 
     async def check_route(self) -> None:
-        """Check the route by performing a preflight request to ensure the model is ready."""
+        """Check the pinned route, its prices and the key's allowance before any request."""
         self.prices = await asyncio.to_thread(preflight, self.config, self.api_key)
         self.ready = True
 
@@ -299,7 +307,8 @@ class OpenRouterModel:
                     entry.update(status="failed", error_type=type(error).__name__)
                     raise
                 finally:
-                    # Keep holds for ambiguous failures and cancellations.
+                    # A request that may have been charged keeps its reservation,
+                    # even when it failed or was cancelled.
                     self.ledger.uncertain(request_id)
                     self.audit.publish(entry)
                 if attempt == retries:
@@ -329,9 +338,9 @@ class OpenRouterModel:
             "tools": tools,
             "temperature": self.config["agent_route"]["temperature"],
             "provider": routing(self.config),
+            "reasoning": {"effort": self.config["agent_route"]["reasoning_effort"]},
             self.config["agent_route"]["output_token_parameter"]: output,
         }
-        body["reasoning"] = {"effort": self.config["agent_route"]["reasoning_effort"]}
         return body, estimate, output
 
     async def _attempt(

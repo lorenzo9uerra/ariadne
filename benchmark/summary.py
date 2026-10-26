@@ -186,8 +186,8 @@ def score_attempt(
         row["elapsed_seconds"] = number(
             (execution.finished_at - execution.started_at).total_seconds()
         )
-    # The time axis is part of the result: how close the attempt ran to the
-    # configured budget, and whether the budget (or the context window) ended it.
+    # How much of the time budget the attempt used, and whether the time limit
+    # or the context window ended it.
     budget = number(
         ((plan.get("settings") or {}).get("budgets") or {}).get("elapsed_seconds")
     )
@@ -334,7 +334,7 @@ def decoy_report(plan: dict, rows: list[dict]) -> dict:
 
 
 def mean_scores(runs: list[dict]) -> dict:
-    """Equal weight per task run."""
+    """Each score's mean over the task runs, every task weighted equally."""
     return {metric: sum(run[metric] for run in runs) / len(runs) for metric in SCORES}
 
 

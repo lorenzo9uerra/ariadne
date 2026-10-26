@@ -176,8 +176,8 @@ class WebFilter:
             raise
         finally:
             self.seconds += time.monotonic() - started
-            # The first snapshot marks a started decision. This final snapshot
-            # keeps the raw response even if parsing or usage validation failed.
+            # audit.record saved the decision as started; save it again with its
+            # outcome, keeping the raw response even when parsing failed.
             audit.publish(entry)
 
     def contains_secret(self, candidate: dict) -> bool:
@@ -233,7 +233,7 @@ class WebFilter:
                 session.counters.charge_filter(failed_tokens)
             except BudgetExceeded:
                 over_budget = True
-        # Spending labels match the ones the agent loop uses for its own model.
+        # The same stop reasons the agent's own model requests use.
         if isinstance(error, AttemptSpendingLimit):
             reason = "attempt_spending_limit"
         elif isinstance(error, SpendingLimit):

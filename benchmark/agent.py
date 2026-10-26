@@ -1,4 +1,4 @@
-"""Controlled model and unpaid scripted agents for native Harbor trials."""
+"""The Ariadne agent for Harbor trials: its model, its tools and their limits."""
 
 import asyncio
 import base64
@@ -63,6 +63,8 @@ CAPTURE = script("capture.sh")
 
 
 def decode_capture(text: str, limit: int) -> dict:
+    """Read capture.sh's five lines: exit status, the two stream sizes, and the
+    two streams in base64, each checked against the byte limit."""
     lines = text.splitlines()
     if len(lines) != 5:
         raise RuntimeError("Shell output must contain five transport fields")
@@ -119,7 +121,8 @@ TOOLS = [
 
 
 def parse_calls(message: dict, turn: int) -> list[dict]:
-    """Keep arguments raw; the dispatcher accounts for proposals before parsing."""
+    """The reply's tool calls, arguments unparsed: the dispatcher counts every
+    call before it parses any."""
     calls = []
     for index, raw in enumerate(message.get("tool_calls") or [], 1):
         function = raw.get("function", {})
@@ -136,7 +139,8 @@ def parse_calls(message: dict, turn: int) -> list[dict]:
 
 
 def observation_text(result: dict) -> str:
-    # Deliver successful observations verbatim, as the web filter approved them.
+    # A successful result is passed on exactly as the tool (and, for web tools,
+    # the web filter) returned it.
     return (
         result["text"]
         if result["error"] is None
@@ -301,7 +305,8 @@ class AriadneAgent(BaseAgent):
             attempt.persist()
 
 
-# How an exception ends an attempt; anything unlisted is an interruption.
+# The stop reason for each exception that ends an attempt; any other exception
+# is recorded as "interrupted_or_error".
 STOP_REASONS = (
     (TimeoutError, "elapsed_seconds"),
     (ContextLimit, "context_limit"),
@@ -496,12 +501,8 @@ class AgentAttempt:
 
     def persist(self) -> None:
         """Save usage, metadata and the trajectory; called after every change."""
-        agent, model, session, context = (
-            self.agent,
-            self.model,
-            self.session,
-            self.context,
-        )
+        agent, model = self.agent, self.model
+        session, context = self.session, self.context
         context.n_input_tokens = model.usage["prompt_tokens"]
         context.n_output_tokens = model.usage["completion_tokens"]
         context.n_cache_tokens = model.usage["cached_tokens"]

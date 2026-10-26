@@ -93,7 +93,10 @@ def render_user_message(
 
 @cache
 def encoding() -> tiktoken.Encoding:
-    """A proxy, not the routes' tokenizers; loaded on first use, not on import."""
+    """The tokenizer for estimating classifier input, loaded on first use.
+
+    It approximates the routes' own tokenizers; the provider's count is exact.
+    """
     return tiktoken.get_encoding("o200k_base")
 
 
@@ -168,8 +171,8 @@ class Classifier:
     settings: dict
     budgets: dict
     seed: int
-    # Another task on the same route and controls (automatic triage): its own
-    # system prompt, response schema and parser replace the web filter's.
+    # Set for automatic triage, which uses the same route and settings but its
+    # own system prompt, response schema and parser instead of the web filter's.
     prompt: str | None = None
     schema: dict | None = None
     parse: Callable[[str], dict] | None = None
@@ -180,7 +183,7 @@ class Classifier:
             self.settings["context_tokens"] * amount(self.settings["input_per_million"])
             + self.budgets["filter_max_output_tokens"]
             * amount(self.settings["output_per_million"])
-        ) / 1_000_000
+        ) / MICRODOLLARS
 
     def build(self, user_message: str) -> dict:
         """The request body; raises OversizedRequest above the input token limit."""

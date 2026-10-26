@@ -19,6 +19,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from benchmark.answers import inner, parse_answer, reward_weights
+from benchmark.classifiers import loads_unique
 from benchmark.flags import generate_flag
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -192,7 +193,7 @@ def player_files(root: Path, manifest: dict) -> dict[str, str]:
     # have no files/ directory at all. An empty one is rejected.
     generated_only = bool(manifest.get("instance")) and not declared and not actual
     if (root / "files").exists() and not actual:
-        raise ValueError("A fully generated package has no static player artifacts")
+        raise ValueError("files/ is empty: remove it if the task has no static files")
     if not generated_only and (not actual or set(declared) != actual):
         raise ValueError("Every player artifact must have exactly one declared hash")
     files = {}
@@ -493,16 +494,7 @@ def reviewer_context(package: Package) -> dict:
     path = package_path(package.root, package.manifest["reviewer_context"])
     if not path.relative_to(package.root).as_posix().startswith("private/"):
         raise ValueError("Reviewer context must be private")
-
-    def unique(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("Duplicate reviewer context field")
-            result[key] = value
-        return result
-
-    context = json.loads(path.read_text(), object_pairs_hook=unique)
+    context = loads_unique(path.read_text())
     record = ReviewerContext.model_validate(context)
     checks = {
         "context_version": bool(record.context_version.strip()),

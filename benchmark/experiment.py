@@ -306,7 +306,7 @@ async def execute_job(
         job.on_trial_started(started)
         if on_trial_result is not None:
             job.on_trial_ended(ended)
-        # Native n_attempts executes every repeat, including after a success.
+        # Harbor runs every repeat, even after one succeeds.
         await job.run()
         if trial_error is not None:
             raise trial_error
@@ -332,7 +332,8 @@ async def execute_job(
         record_results(folder, name)
 
 
-def active(folder):
+def active(folder: Path) -> dict:
+    """The current attempt in each (task, slot): the latest one, after replacements."""
     summary = summarize(folder)
     return {(a["planned_job"], a["slot"]): a for a in summary["attempts"]}
 
@@ -451,13 +452,19 @@ def check_result(row: dict | None) -> None:
         )
 
 
-def no_active_jobs(experiments):
+def unfinished_jobs(events: list[dict]) -> bool:
+    """Whether the journal has a job that started and never recorded its end."""
+    ended = {event["job"] for event in events if event["event"] == "job_ended"}
+    return any(
+        event["event"] == "job_started" and event["job"] not in ended
+        for event in events
+    )
+
+
+def no_active_jobs(experiments: Path) -> None:
     for folder in experiments.glob("experiment-*"):
         with journal(folder) as (events, _):
-            ended = {e["job"] for e in events if e["event"] == "job_ended"}
-            if any(
-                e["event"] == "job_started" and e["job"] not in ended for e in events
-            ):
+            if unfinished_jobs(events):
                 raise RuntimeError(
                     f"Running or unfinished job recorded in {folder}; inspect it first"
                 )
@@ -527,7 +534,7 @@ async def run_experiment(
 
 
 async def replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
-    # Keep the reservation and execution under one cross-process lock.
+    # One lock, across processes, from recording the replacement until it has run.
     with replacement_lock(folder):
         await _replace_attempt(folder, planned_job, slot)
 
@@ -538,11 +545,7 @@ async def _replace_attempt(folder: Path, planned_job: str, slot: int) -> None:
     if item is None or type(slot) is not int or not 1 <= slot <= item["attempts"]:
         raise ValueError("Unknown planned job or attempt slot")
     with journal(folder) as (events, append):
-        ended = {event["job"] for event in events if event["event"] == "job_ended"}
-        if any(
-            event["event"] == "job_started" and event["job"] not in ended
-            for event in events
-        ):
+        if unfinished_jobs(events):
             raise ValueError("Wait for running jobs to finish before replacement")
         attempts = [
             event

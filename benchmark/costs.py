@@ -81,7 +81,7 @@ class Ledger:
         if limit_usd is None:
             limit_usd = os.environ.get("ARIADNE_SPENDING_LIMIT_USD")
         self.limit = microdollars(limit_usd) if limit_usd is not None else None
-        # One run_id represents one attempt.
+        # A run_id is one attempt, so this limit applies per attempt.
         self.attempt_limit = (
             microdollars(attempt_limit_usd) if attempt_limit_usd is not None else None
         )
@@ -169,7 +169,8 @@ class Ledger:
                 "WHERE id=?",
                 (billed, generation_id, request_id),
             )
-        # Preserve an unexpected real charge before reporting the defect.
+        # The charge is recorded first, so an overcharge stays in the ledger
+        # when the error below is raised.
         if billed > row[0]:
             raise CostAccountingError("Reported charge exceeded its reservation")
 
