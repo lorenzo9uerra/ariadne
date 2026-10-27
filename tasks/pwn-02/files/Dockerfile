@@ -4,7 +4,7 @@ RUN apk add --no-cache gcc musl-dev python3
 WORKDIR /src
 COPY src/readflag.c /src/readflag.c
 COPY flag.txt /src/flag.txt
-RUN python3 -c 'from pathlib import Path; src = Path("/src/readflag.c").read_text(); flag = Path("/src/flag.txt").read_text().rstrip("\n"); Path("/src/readflag_patched.c").write_text(src.replace("SEKAI{REPLACE_ME}", flag))' \
+RUN python3 -c 'from pathlib import Path; src = Path("/src/readflag.c").read_text(); flag = Path("/src/flag.txt").read_text().rstrip("\n"); Path("/src/readflag_patched.c").write_text(src.replace("flag{REPLACE_ME}", flag))' \
     && gcc /src/readflag_patched.c -static -O2 -s -o /readflag \
     && chmod 4511 /readflag
 

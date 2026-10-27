@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-tmp="${nsjail_cfg}.ppp"
+tmp="${nsjail_cfg}.patched"
 sed '1,/nosuid:true/s/nosuid:true/nosuid:false/' "$nsjail_cfg" > "$tmp"
 printf '\n' >> "$tmp"
 cat >> "$tmp" <<'EOF'
