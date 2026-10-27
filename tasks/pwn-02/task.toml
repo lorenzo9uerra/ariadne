@@ -23,7 +23,7 @@ reference_sha256 = "3c3f2fc0d7a59ff795ebf1a2706d7d6bc3414c4454384dd94ef226263418
 service_compose = "service/compose.yaml"
 service_port = 5000
 target_seccomp = "service/seccomp.json"
-instruction_sha256 = "8eaf5756efd4cea9aac8460c068414d50742bde89e401ba5579d7593205e1eaa"
+instruction_sha256 = "d141366fe62cb4d1c93148f6ec0968055b672c3275023f3db834b488c37b6c4d"
 [metadata.ariadne.service_sha256]
 "service/Dockerfile" = "17ae04c195335c80e19355e3ae047a3c752912d4097b6b0950d9536cfe011fd4"
 "service/seccomp.json" = "1d20c8e899eeab621807b9f7c7675dc68521f568d852c58ffefbddb2c6250bcf"
