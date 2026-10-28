@@ -82,8 +82,6 @@ network_mode = "allowlist"
 allowed_hosts = [ "target",]
 build_timeout_sec = 1800.0
 os = "linux"
-cpus = 1
-memory_mb = 2048
 workdir = "/workspace"
 
 [metadata.ariadne.reward_weights]

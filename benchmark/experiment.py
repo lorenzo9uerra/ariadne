@@ -90,6 +90,7 @@ def job_config(
     environment["kwargs"] = {
         **(environment.get("kwargs") or {}),
         "variant": plan_variant(settings),
+        "sandbox_limits": settings["sandbox"],
     }
     if data["n_concurrent_trials"] != 1 or data["retry"]["max_retries"] != 0:
         raise ValueError("Review concurrency or automatic retries before changing them")

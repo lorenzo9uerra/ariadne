@@ -15,16 +15,16 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    cpus: 1.0
-    mem_limit: 2g
-    memswap_limit: 2g
-    pids_limit: 128
+    cpus: ${ARIADNE_CPUS:?set by the secure environment}
+    mem_limit: ${ARIADNE_MEMORY_BYTES:?set by the secure environment}
+    memswap_limit: ${ARIADNE_MEMORY_BYTES:?set by the secure environment}
+    pids_limit: ${ARIADNE_PIDS:?set by the secure environment}
     ulimits:
       core: 0
       nofile:
         soft: 1024
         hard: 1024
     tmpfs:
-      - /workspace:rw,exec,nosuid,nodev,size=268435456,uid=1000,gid=1000,mode=0700
-      - /tmp:rw,noexec,nosuid,nodev,size=67108864,mode=1777
+      - /workspace:rw,exec,nosuid,nodev,size=${ARIADNE_WORKSPACE_BYTES:?set by the secure environment},uid=1000,gid=1000,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=${ARIADNE_TEMP_BYTES:?set by the secure environment},mode=1777
       - /home/agent:rw,exec,nosuid,nodev,size=16777216,uid=1000,gid=1000,mode=0700

@@ -24,8 +24,10 @@ from harbor.models.trial.paths import TrialPaths
 
 from benchmark import verifier
 from benchmark.answers import METRICS, reward_values
+from benchmark.budgets import load_draft
 from benchmark.tasks import ROOT, Package
 from benchmark.verifier import read_or_none, score
+from sandbox.checks import LIMIT_VARIABLES
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import (
     SUBMISSION_BYTES,
@@ -49,6 +51,27 @@ DOCKER = pytest.mark.skipif(
     os.environ.get("RUN_DOCKER") != "1",
     reason="Opt-in unpaid Harbor/Docker integration",
 )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"pids": 0}, {"cpus": True}, {"memory_bytes": "2g"}, {"swap_bytes": 1}],
+)
+def test_sandbox_limits_must_be_the_five_positive_numbers(change):
+    limits = load_draft()["sandbox"] | change
+    with pytest.raises(ValueError, match="sandbox"):
+        AriadneDockerEnvironment(sandbox_limits=limits)
+
+
+def test_sandbox_limits_reach_compose_through_the_environment(monkeypatch):
+    limits = load_draft()["sandbox"] | {"memory_bytes": 3 * 2**30}
+    for name in LIMIT_VARIABLES.values():
+        monkeypatch.delenv(name, raising=False)
+    # The limits are set before Harbor's own setup, which needs a real task.
+    with pytest.raises(TypeError):
+        AriadneDockerEnvironment(sandbox_limits=limits)
+    assert os.environ["ARIADNE_MEMORY_BYTES"] == str(3 * 2**30)
+    assert os.environ["ARIADNE_CPUS"] == str(limits["cpus"])
 
 
 def test_shared_image_is_prepared_during_startup(tmp_path, monkeypatch):

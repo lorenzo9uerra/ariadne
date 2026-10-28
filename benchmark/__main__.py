@@ -18,19 +18,8 @@ from benchmark.experiment import (
 )
 from benchmark.records import read_plan
 from benchmark.summary import DISPOSITIONS, write_summary
-from benchmark.tasks import ROOT, Package, limit_drift, load_package, write_limits
+from benchmark.tasks import ROOT, Package, load_package
 from sandbox.docker_host import select_platform
-
-
-def sync_limits() -> list[str]:
-    """Bring every task's limit files in line with [sandbox]; name the changes."""
-    limits = load_draft()["sandbox"]
-    changed = []
-    for root in sorted((ROOT / "tasks").iterdir()):
-        if (root / "task.toml").is_file() and (drift := limit_drift(root, limits)):
-            write_limits(root, limits)
-            changed.append(f"{root.name}: {', '.join(drift)}")
-    return changed
 
 
 def check_docker_host(packages: list[Package]) -> None:
@@ -78,10 +67,6 @@ def main() -> None:
         nargs="?",
         help="A job directory (default: the newest in jobs/)",
     )
-    commands.add_parser(
-        "sync-limits",
-        help="Rewrite every task's container limits from [sandbox] in draft.toml",
-    )
     show = commands.add_parser("report", help="Rewrite summary.json")
     show.add_argument("experiment", type=Path)
     label = commands.add_parser("review", help="Record a review decision")
@@ -124,9 +109,6 @@ def main() -> None:
     try:
         if args.command == "check":
             print("\n".join(check_job(args.job)))
-            return
-        if args.command == "sync-limits":
-            print("\n".join(sync_limits()) or "Every task already matches [sandbox].")
             return
         if args.command == "run":
             settings = load_draft(model=args.model, limits=args.limits)

@@ -16,7 +16,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict
 
 from benchmark.answers import inner, parse_answer, reward_weights
@@ -514,90 +513,3 @@ def reviewer_context(package: Package) -> dict:
             f"Reviewer context disagrees with the admitted task: {', '.join(mismatched)}"
         )
     return context
-
-
-# Every task's agent container uses the limits in [sandbox] of draft.toml. Each
-# task repeats them in three files, which Harbor and Docker read directly:
-# environment/limits.json, environment/docker-compose.yaml and task.toml.
-# limit_drift lists where a task differs, and write_limits brings it in line.
-
-
-def _compose_limits(limits: dict) -> dict:
-    """The agent service's settings in docker-compose.yaml for these limits."""
-    return {
-        "cpus": limits["cpus"],
-        "mem_limit": limits["memory_bytes"],
-        "memswap_limit": limits["memory_bytes"],
-        "pids_limit": limits["pids"],
-    }
-
-
-def _tmpfs_sizes(limits: dict) -> dict:
-    return {"/workspace": limits["workspace_bytes"], "/tmp": limits["temp_bytes"]}
-
-
-def _with_size(mount: str, size: int) -> str:
-    return re.sub(r"size=\d+", f"size={size}", mount)
-
-
-def limit_drift(root: Path, limits: dict) -> list[str]:
-    """Where a task's agent container limits differ from the shared ones."""
-    environment = root / "environment"
-    drift = []
-    recorded = json.loads((environment / "limits.json").read_text())
-    drift += [
-        f"limits.json {key}"
-        for key, value in limits.items()
-        if recorded.get(key) != value
-    ]
-    compose = yaml.safe_load((environment / "docker-compose.yaml").read_text())
-    main = compose["services"]["main"]
-    drift += [
-        f"docker-compose.yaml {key}"
-        for key, value in _compose_limits(limits).items()
-        if main.get(key) != value
-    ]
-    for path, size in _tmpfs_sizes(limits).items():
-        mounts = [m for m in main.get("tmpfs", []) if m.split(":", 1)[0] == path]
-        if [_with_size(m, size) for m in mounts] != mounts or not mounts:
-            drift.append(f"docker-compose.yaml tmpfs {path}")
-    settings = tomllib.loads((root / "task.toml").read_text())["environment"]
-    if settings.get("cpus") != limits["cpus"]:
-        drift.append("task.toml cpus")
-    if settings.get("memory_mb") != limits["memory_bytes"] // 2**20:
-        drift.append("task.toml memory_mb")
-    return drift
-
-
-def write_limits(root: Path, limits: dict) -> None:
-    """Rewrite a task's three limit files to match the shared limits."""
-    environment = root / "environment"
-    path = environment / "limits.json"
-    recorded = json.loads(path.read_text())
-    path.write_text(json.dumps(recorded | limits))
-    path = environment / "docker-compose.yaml"
-    compose = yaml.safe_load(path.read_text())
-    main = compose["services"]["main"]
-    main.update(_compose_limits(limits))
-    sizes = _tmpfs_sizes(limits)
-    main["tmpfs"] = [
-        _with_size(m, sizes[m.split(":", 1)[0]]) if m.split(":", 1)[0] in sizes else m
-        for m in main["tmpfs"]
-    ]
-    path.write_text(yaml.safe_dump(compose))
-    # Only the [environment] table: the verifier's own table keeps its limits.
-    path = root / "task.toml"
-    text = path.read_text()
-    table = re.search(r"^\[environment\]\n(?:(?!^\[).*\n)*", text, re.M)
-    if table is None:
-        raise ValueError(f"{path} has no [environment] table")
-    block = re.sub(
-        r"^cpus = .*$", f"cpus = {limits['cpus']:g}", table.group(0), flags=re.M
-    )
-    block = re.sub(
-        r"^memory_mb = .*$",
-        f"memory_mb = {limits['memory_bytes'] // 2**20}",
-        block,
-        flags=re.M,
-    )
-    path.write_text(text[: table.start()] + block + text[table.end() :])

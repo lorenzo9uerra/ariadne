@@ -102,6 +102,35 @@ EPHEMERAL_MOUNTS = {"/workspace", "/tmp"}
 HOME = "/home/agent"
 HOME_BYTES = 16 * 1024 * 1024
 
+# The agent container's limits come from [sandbox] in draft.toml, frozen in an
+# experiment's plan. Each task's docker-compose.yaml refers to them through
+# these variables, which the environment sets before Docker Compose runs.
+LIMIT_VARIABLES = {
+    "cpus": "ARIADNE_CPUS",
+    "memory_bytes": "ARIADNE_MEMORY_BYTES",
+    "pids": "ARIADNE_PIDS",
+    "workspace_bytes": "ARIADNE_WORKSPACE_BYTES",
+    "temp_bytes": "ARIADNE_TEMP_BYTES",
+}
+
+
+def check_sandbox_limits(limits: dict) -> dict:
+    """The agent container's limits from [sandbox], each a positive number."""
+    if set(limits) != set(LIMIT_VARIABLES) or any(
+        isinstance(value, bool) or type(value) not in (int, float) or value <= 0
+        for value in limits.values()
+    ):
+        raise ValueError(
+            "[sandbox] needs positive cpus, memory_bytes, pids, workspace_bytes "
+            "and temp_bytes"
+        )
+    return dict(limits)
+
+
+def limit_reference(key: str) -> str:
+    """How a compose file refers to one of the agent container's limits."""
+    return f"${{{LIMIT_VARIABLES[key]}:?set by the secure environment}}"
+
 
 def tmpfs_size(options: str) -> int | None:
     """The size in bytes from tmpfs options such as "rw,size=65536"."""
