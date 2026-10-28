@@ -14,7 +14,7 @@ from benchmark.tasks import (
     validate_target_seccomp,
     write_target_flag,
 )
-from tests.support import load_protocol, native_record, target_limits
+from tests.support import SERVICE_LIMITS, native_record, target_limits
 
 FIXTURE = ROOT / "tests" / "fixtures" / "service-01"
 FLAG_KEY = "target:/workspace/flag.txt"
@@ -46,11 +46,10 @@ def test_write_target_flag_stages_the_flag_only_in_the_target(tmp_path):
 
 
 def test_package_can_raise_one_service_limit_without_changing_the_others():
-    protocol = load_protocol()
-    limits = target_limits({"service_limits": {"cpus": 1.0}}, protocol)
+    limits = target_limits({"service_limits": {"cpus": 1.0}})
     assert limits["cpus"] == 1.0
-    assert limits["memory_bytes"] == protocol["service_sandbox"]["memory_bytes"]
-    assert limits["pids"] == protocol["service_sandbox"]["pids"]
+    assert limits["memory_bytes"] == SERVICE_LIMITS["memory_bytes"]
+    assert limits["pids"] == SERVICE_LIMITS["pids"]
 
 
 def _reviewed_profile(tmp_path):
@@ -161,9 +160,8 @@ def test_target_seccomp_rejects_allow_all_and_missing_personality(tmp_path):
 
 
 def test_unknown_service_limit_is_rejected():
-    protocol = load_protocol()
     with pytest.raises(ValueError, match="Unknown service limit"):
-        target_limits({"service_limits": {"swap_bytes": 1}}, protocol)
+        target_limits({"service_limits": {"swap_bytes": 1}})
 
 
 def test_tampered_service_artifact_is_rejected(tmp_path):
