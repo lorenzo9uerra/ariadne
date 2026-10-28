@@ -245,8 +245,9 @@ def test_key_limit_is_provider_configuration():
 def test_full_context_reservation_and_verified_rates():
     config = load_draft(model=TEST_MODEL)
     prices = Prices.from_config(config)
-    # Full context at the input rate plus the output allowance.
-    assert prices.reservation(16384) == Decimal("0.74727424")
+    # Full context at the input rate plus the output allowance:
+    # (1,048,576 x $0.147 + 16,384 x $0.441) per million tokens.
+    assert prices.reservation(16384) == Decimal("0.161366016")
     check_endpoint(endpoint_data(), config, prices)
 
 
@@ -344,7 +345,7 @@ def test_preflight_checks_key_and_endpoint(monkeypatch):
 
     monkeypatch.setattr("benchmark.costs.read_json", read)
     assert preflight(config, "synthetic") == Prices.from_config(config)
-    assert calls == ["/key", "/models/mistralai/mistral-large-4-0/endpoints"]
+    assert calls == ["/key", f"/models/{TEST_MODEL}/endpoints"]
     with pytest.raises(CostAccountingError):
         preflight(config, "")
     config = copy.deepcopy(config)

@@ -56,7 +56,7 @@ SERVICE_LIMITS = {
 }
 
 # The declared profile tests use wherever an agent route is needed.
-TEST_MODEL = "mistralai/mistral-large-4-0"
+TEST_MODEL = "deepseek/deepseek-v4.1-flash-1017"
 
 
 class FakeClassifier:
@@ -630,7 +630,7 @@ def native_flag_task(package, template_dir, image, platform):
 def completion(calls=None, content="Synthetic response", **usage):
     return {
         "id": "synthetic-generation",
-        "provider": "Mistral",
+        "provider": load_draft(model=TEST_MODEL)["agent_route"]["provider_name"],
         "choices": [
             {
                 "message": {

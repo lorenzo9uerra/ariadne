@@ -88,7 +88,7 @@ def test_request_is_reserved_and_routed_before_response(model_factory):
         assert model is not None
         assert model.ledger.totals()["held_usd"] > 0
         body = json.loads(request.content)
-        assert body["provider"]["only"] == ["mistral"]
+        assert body["provider"]["only"] == [model.config["agent_route"]["provider"]]
         assert body["provider"]["allow_fallbacks"] is False
         assert body["max_tokens"] == model.config["budgets"]["agent_max_output_tokens"]
         assert "max_completion_tokens" not in body
@@ -557,7 +557,7 @@ def test_error_lookup_requires_confirmed_matching_billing(model_factory, defect)
     requests = []
     metadata = {
         "id": "gen-synthetic-error",
-        "model": "mistralai/mistral-large-4-0",
+        "model": TEST_MODEL,
         "provider_name": config["agent_route"]["provider_name"],
         "is_byok": False,
         "finish_reason": "error",
