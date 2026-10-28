@@ -48,6 +48,19 @@ run builds the shared sandbox image on the VM. Rerun only the checks with
 `--tags verify`. Changes to the harness need no redeployment, because it runs
 on the evaluation host.
 
+If the VM already runs Docker, you can skip the playbook and create the context
+yourself. A Docker context is a saved name for a Docker engine, and one whose
+address starts with `ssh://` reaches the engine over SSH, using the alias in
+`~/.ssh/config`:
+
+```sh
+docker context create ariadne-benchmark-vm --docker host=ssh://benchmark-vm
+docker --context ariadne-benchmark-vm info --format '{{.Architecture}}'
+```
+
+The second command should print `x86_64`. Docker keeps contexts under
+`~/.docker/contexts/`, and `docker context ls` lists them.
+
 ## Use
 
 Experiments take the context as an option, which `run`, `resume` and
@@ -62,8 +75,11 @@ Harbor's own commands read it from `DOCKER_CONTEXT`:
 ```sh
 DOCKER_CONTEXT=ariadne-benchmark-vm uv run harbor run -c job.dev.yaml -p tasks/pwn-01
 DOCKER_CONTEXT=ariadne-benchmark-vm uv run harbor run -c job.dev.yaml -p tasks/pwn-01 -a oracle
-DOCKER_CONTEXT=ariadne-benchmark-vm uv run python -m benchmark check
 ```
+
+`uv run python -m benchmark check` then checks the finished job's isolation
+and cleanup evidence. It only reads the job's local files, so it needs no
+context.
 
 The environment compares each task's declared `architecture` with the
 engine's and refuses to run on a mismatch, without emulating. Tasks declaring
