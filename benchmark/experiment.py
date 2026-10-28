@@ -397,10 +397,23 @@ def check_trial(trial: Path) -> str:
             ]
         for kind, identifier in identifiers:
             inspected = subprocess.run(
-                ["docker", kind, "inspect", identifier], capture_output=True, timeout=15
+                ["docker", kind, "inspect", identifier],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             if inspected.returncode == 0:
                 raise RuntimeError(f"{trial.name}: a {kind} was not removed")
+            # Only the host's own "not found" answer shows the removal. Any
+            # other failure, such as an unreachable Docker host, proves nothing.
+            if not any(
+                answer in inspected.stderr
+                for answer in (f"No such {kind}", f"{kind} {identifier} not found")
+            ):
+                raise RuntimeError(
+                    f"{trial.name}: could not ask Docker about a {kind}: "
+                    f"{inspected.stderr.strip()[-500:]}"
+                )
     rewards = result.verifier_result.rewards if result.verifier_result else None
     if result.agent_info.name != "oracle":
         return f"{trial.name}: evidence confirmed; scores {json.dumps(rewards)}"

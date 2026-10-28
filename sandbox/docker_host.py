@@ -39,7 +39,7 @@ def docker_architecture() -> str:
         detail = (
             error.stderr or f"Docker exited with status {error.returncode}"
         ).strip()
-        raise SystemExit(
+        raise RuntimeError(
             f"Docker host check failed:\n{detail}\n"
             "Use 'docker context ls' to check the context name."
         ) from None
@@ -55,7 +55,7 @@ def select_platform(required: str) -> str:
     """
     host = docker_architecture()
     if required not in ("any", host):
-        raise SystemExit(
+        raise RuntimeError(
             f"This package needs a linux/{required} Docker host, but the active "
             f"Docker context runs linux/{host}. Select a matching context with "
             "--docker-context or DOCKER_CONTEXT (see docs/vm_setup.md)."
@@ -63,7 +63,7 @@ def select_platform(required: str) -> str:
     platform = f"linux/{host}"
     preset = os.environ.get("SANDBOX_PLATFORM")
     if preset and preset != platform:
-        raise SystemExit(
+        raise RuntimeError(
             f"SANDBOX_PLATFORM={preset} does not match the {platform} host"
         )
     os.environ["SANDBOX_PLATFORM"] = platform

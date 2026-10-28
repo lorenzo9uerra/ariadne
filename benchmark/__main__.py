@@ -95,11 +95,11 @@ def main() -> None:
     rerun.add_argument("experiment", type=Path)
     rerun.add_argument("--job", required=True)
     rerun.add_argument("--slot", type=int, required=True)
-    for command in (start, resume, rerun):
+    for command in (start, resume, rerun, check):
         command.add_argument(
             "--docker-context",
             metavar="NAME",
-            help="Docker context to run the trials on, such as the remote VM "
+            help="Docker context the trials run on, such as the remote VM "
             "(default: DOCKER_CONTEXT or the active context)",
         )
     args = parser.parse_args()

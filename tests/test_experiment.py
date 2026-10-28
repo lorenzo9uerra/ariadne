@@ -587,7 +587,10 @@ def test_check_confirms_evidence_and_removed_containers(
     for record in job.glob("*/security-*.json"):
         data = json.loads(record.read_text()) | {"container_id": "synthetic"}
         record.write_text(json.dumps(data))
-    inspected = SimpleNamespace(returncode=1 if removed else 0)
+    inspected = SimpleNamespace(
+        returncode=1 if removed else 0,
+        stderr="Error response from daemon: No such container: synthetic",
+    )
     monkeypatch.setattr(experiment.subprocess, "run", lambda *a, **k: inspected)
     # Without an argument, check reads the newest job under ROOT/jobs.
     monkeypatch.setattr(experiment, "ROOT", tmp_path)
@@ -600,6 +603,24 @@ def test_check_confirms_evidence_and_removed_containers(
         with pytest.raises(SystemExit):
             cli.main()
         assert "was not removed" in capsys.readouterr().err
+
+
+def test_check_fails_when_docker_cannot_answer(harness, tmp_path, monkeypatch, capsys):
+    # Checked against the wrong or an unreachable host, a failed inspect
+    # proves nothing about removal.
+    folder = run(harness, tmp_path)
+    job = Path(experiment.summarize(folder)["attempts"][0]["path"]).parents[1]
+    for record in job.glob("*/security-*.json"):
+        data = json.loads(record.read_text()) | {"container_id": "synthetic"}
+        record.write_text(json.dumps(data))
+    unreachable = SimpleNamespace(
+        returncode=1, stderr="Cannot connect to the Docker daemon"
+    )
+    monkeypatch.setattr(experiment.subprocess, "run", lambda *a, **k: unreachable)
+    monkeypatch.setattr(sys, "argv", ["experiment", "check", str(job)])
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert "could not ask Docker" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(
@@ -853,12 +874,12 @@ def test_cli_docker_context_option_selects_the_docker_host(
 
 
 def test_cli_refuses_a_docker_host_that_cannot_run_the_task(
-    harness, tmp_path, monkeypatch
+    harness, tmp_path, monkeypatch, capsys
 ):
     started = []
 
     def wrong_host(required):
-        raise SystemExit(f"This package needs a linux/{required} Docker host")
+        raise RuntimeError(f"This package needs a linux/{required} Docker host")
 
     async def experiment_run(*args, **kwargs):
         started.append(True)
@@ -872,8 +893,9 @@ def test_cli_refuses_a_docker_host_that_cannot_run_the_task(
         ["experiment", "run", "--task", "synthetic", "--model", TEST_MODEL]
         + ["--jobs-dir", str(tmp_path / "jobs")],
     )
-    with pytest.raises(SystemExit, match="Docker host"):
+    with pytest.raises(SystemExit):
         cli.main()
+    assert "Docker host" in capsys.readouterr().err
     # Nothing ran and no experiment folder was created.
     assert not started
     assert not (tmp_path / "logs").exists()
@@ -1269,12 +1291,11 @@ def test_awareness_keeps_categories_without_attempts():
             {"name": "rev-01", "category": "rev"},
         ]
     }
-    events = [{"event": "autoreview", "attempt": "a1", "awareness": "eval-aware"}]
     rows = [
-        {"attempt": "a1", "planned_job": "sandbox-02", "raw_solve": 1},
-        {"attempt": "a2", "planned_job": "sandbox-02", "raw_solve": 0},
+        {"planned_job": "sandbox-02", "raw_solve": 1, "awareness": "eval-aware"},
+        {"planned_job": "sandbox-02", "raw_solve": 0, "awareness": None},
     ]
-    report = awareness_by_category(events, plan, rows)
+    report = awareness_by_category(plan, rows)
     assert report["sandbox"]["eval-aware"] == {"attempts": 1, "solves": 1}
     assert report["sandbox"]["unlabelled"] == {"attempts": 1, "solves": 0}
     assert all(entry["attempts"] == 0 for entry in report["rev"].values())

@@ -39,14 +39,14 @@ def test_matching_and_any_architecture_select_the_host_platform(
 
 def test_architecture_mismatch_is_refused_instead_of_emulated(host):
     host("arm64")
-    with pytest.raises(SystemExit, match="linux/amd64 Docker host"):
+    with pytest.raises(RuntimeError, match="linux/amd64 Docker host"):
         docker_host.select_platform("amd64")
 
 
 def test_conflicting_preset_platform_is_refused(host, monkeypatch):
     host("amd64")
     monkeypatch.setenv("SANDBOX_PLATFORM", "linux/arm64")
-    with pytest.raises(SystemExit, match="does not match"):
+    with pytest.raises(RuntimeError, match="does not match"):
         docker_host.select_platform("amd64")
 
 
@@ -65,7 +65,7 @@ def test_docker_connection_failure_reports_the_original_diagnostic(monkeypatch):
         )
 
     monkeypatch.setattr(docker_host, "docker", fail)
-    with pytest.raises(SystemExit) as error:
+    with pytest.raises(RuntimeError) as error:
         docker_host.docker_architecture()
     assert 'context "missing-vm": context not found' in str(error.value)
     assert "docker context ls" in str(error.value)

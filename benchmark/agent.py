@@ -40,11 +40,7 @@ from benchmark.tasks import ROOT, package_path, reviewer_context
 from benchmark.web import NetworkBackend, web_fetch, web_search
 from benchmark.web_filter import FilterClassifier, filter_classifier
 from sandbox.container import script
-from sandbox.environment import (
-    SUBMISSION_BYTES,
-    AriadneDockerEnvironment,
-    OutputLimitExceeded,
-)
+from sandbox.environment import AriadneDockerEnvironment, OutputLimitExceeded
 
 PROMPT = Path(__file__).with_name("prompts") / "agent.txt"
 
@@ -489,13 +485,7 @@ class AgentAttempt:
     async def submit(self, answer: str) -> str:
         if self.clock.remaining() <= 0:
             raise TimeoutError("Attempt deadline reached")
-        if (
-            not isinstance(answer, str)
-            or len(answer.encode("utf-8")) > SUBMISSION_BYTES
-        ):
-            raise ValueError(
-                f"Submission must be text of at most {SUBMISSION_BYTES} UTF-8 bytes"
-            )
+        # The environment checks the answer's type and size.
         self.environment.record_submission(answer)
         return answer
 
