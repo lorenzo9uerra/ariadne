@@ -824,6 +824,61 @@ def test_web_content_the_labeller_rejects_goes_to_a_human(
     assert all("contamination_suspected" in r["findings"] for r in records)
 
 
+def test_cli_docker_context_option_selects_the_docker_host(
+    harness, tmp_path, monkeypatch
+):
+    seen = []
+    monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
+    monkeypatch.setattr(cli, "load_package", lambda path: harness[0])
+    monkeypatch.setattr(
+        cli,
+        "check_docker_host",
+        lambda packages: seen.append(os.environ.get("DOCKER_CONTEXT")),
+    )
+
+    async def experiment_run(*args, **kwargs):
+        raise ValueError("stop after the host check")
+
+    monkeypatch.setattr(cli, "run_experiment", experiment_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["experiment", "run", "--task", "synthetic", "--model", TEST_MODEL]
+        + ["--docker-context", "remote-vm", "--jobs-dir", str(tmp_path / "jobs")],
+    )
+    with pytest.raises(SystemExit):
+        cli.main()
+    # The context is set before anything talks to Docker.
+    assert seen == ["remote-vm"]
+
+
+def test_cli_refuses_a_docker_host_that_cannot_run_the_task(
+    harness, tmp_path, monkeypatch
+):
+    started = []
+
+    def wrong_host(required):
+        raise SystemExit(f"This package needs a linux/{required} Docker host")
+
+    async def experiment_run(*args, **kwargs):
+        started.append(True)
+
+    monkeypatch.setattr(cli, "load_package", lambda path: harness[0])
+    monkeypatch.setattr(cli, "select_platform", wrong_host)
+    monkeypatch.setattr(cli, "run_experiment", experiment_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["experiment", "run", "--task", "synthetic", "--model", TEST_MODEL]
+        + ["--jobs-dir", str(tmp_path / "jobs")],
+    )
+    with pytest.raises(SystemExit, match="Docker host"):
+        cli.main()
+    # Nothing ran and no experiment folder was created.
+    assert not started
+    assert not (tmp_path / "logs").exists()
+
+
 @pytest.mark.parametrize("model", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"])
 def test_cli_model_profile_reaches_the_frozen_experiment(
     harness, tmp_path, monkeypatch, model
@@ -841,6 +896,7 @@ def test_cli_model_profile_reaches_the_frozen_experiment(
         return await original(packages, jobs_dir, seed=7, **kwargs)
 
     monkeypatch.setattr(cli, "load_package", lambda path: harness[0])
+    monkeypatch.setattr(cli, "check_docker_host", lambda packages: None)
     monkeypatch.setattr(cli, "run_experiment", experiment_run)
     monkeypatch.setattr(
         sys,
@@ -1168,6 +1224,7 @@ def test_resume_command_continues_the_experiment(harness, tmp_path, monkeypatch)
         resumed.append(path)
 
     monkeypatch.setattr(cli, "resume_experiment", resume)
+    monkeypatch.setattr(cli, "planned_packages", lambda folder: [])
     monkeypatch.setattr(sys, "argv", ["experiment", "resume", str(folder)])
     cli.main()
     assert resumed == [folder.resolve()]
