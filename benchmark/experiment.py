@@ -230,12 +230,16 @@ async def execute_job(
     allow_fix=False,
     on_trial_result: Callable[[dict], None] | None = None,
 ) -> None:
-    """Run one native Harbor job: every slot of the given tasks, or some of one's.
+    """Run one Harbor job and record each of its trials in the journal.
 
-    Harbor runs the trials; its hooks journal each as it starts and ends.
+    A new experiment runs every attempt slot of its tasks. `resume` and
+    `replace` run only the given `slots` of one task, and `replaces` links
+    each new attempt to the failed one it replaces. `allow_fix` lets a
+    replacement run on fixed code, which an implementation fault needs.
 
-    on_trial_result, if given, checks each finished trial; an exception there
-    stops the job before its next trial creates an environment.
+    Harbor's hooks write each trial to the journal when it starts and when it
+    ends. `on_trial_result`, if given, then checks the finished trial, and an
+    exception there stops the job before the next trial starts.
     """
     verify_inputs(plan)
     current_implementation = implementation()
