@@ -517,8 +517,6 @@ def review_package(root, architecture="amd64", public_answer=False):
         source=source
         | {
             "sha256": {"files/record.txt": hashlib.sha256(content).hexdigest()},
-            "original": "private/original/record.txt",
-            "original_sha256": hashlib.sha256(content).hexdigest(),
             "published": "2025-01-01",
         },
     )

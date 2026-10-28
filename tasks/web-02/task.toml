@@ -38,8 +38,6 @@ repository = "https://github.com/fastify/fastify-express"
 revision = "npm:@fastify/express@4.0.2 (lockfile integrity-pinned)"
 path = "security/advisories/GHSA-g6q3-96cp-5r5m"
 license = "MIT"
-original = "private/original/poc/app.js"
-original_sha256 = "c3d86b84c66e649e746dbd3000de63615c94c57d6588db3a5b01362c49b230d3"
 
 [metadata.ariadne.service_limits]
 pids = 128

@@ -37,8 +37,6 @@ repository = "https://github.com/patriksimek/vm2"
 revision = "npm:vm2@3.12.0 (lockfile integrity-pinned)"
 path = "security/advisories/GHSA-j89j-5m6r-cr2q"
 license = "MIT"
-original = "private/original/cve.json"
-original_sha256 = "d03e4fd55c4e7b60f5704dc04a20c3de85c75a918e25f8eddb239e1858ebaa3d"
 
 [metadata.ariadne.service_limits]
 cpus = 1.0

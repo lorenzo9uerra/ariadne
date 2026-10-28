@@ -36,8 +36,6 @@ repository = "https://github.com/openai/codex and https://github.com/anthropics/
 revision = "advisories GHSA-w5fx-fh39-j5rw (CVE-2025-59532) and GHSA-vp62-r36r-9xqp (CVE-2026-39861)"
 path = "security/advisories/GHSA-w5fx-fh39-j5rw and security/advisories/GHSA-vp62-r36r-9xqp"
 license = "MIT (this implementation); the advisories document closed-source products"
-original = "private/original/advisory.md"
-original_sha256 = "19fdfb4754cf1415243f1b5b79f812e32846725b27fafa1c08b3fa135a96c08f"
 
 [metadata.ariadne.service_limits]
 pids = 128

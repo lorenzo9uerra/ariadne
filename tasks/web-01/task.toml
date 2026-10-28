@@ -34,8 +34,6 @@ repository = "https://github.com/Nayekah/Next.js-Proof-of-Concept"
 revision = "dfffcfaf87a13765c74b2cb4890a255cf15e189b"
 path = "pocs/cve-2026-29057"
 license = "MIT"
-original = "private/original/poc/README.md"
-original_sha256 = "df14f5e9f5e3551294a8b90b26fcaab30283cda5b38aaa71de89688e164b4ee6"
 
 [metadata.ariadne.service_limits]
 pids = 128

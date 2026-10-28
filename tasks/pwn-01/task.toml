@@ -35,8 +35,6 @@ repository = "https://github.com/b01lers/b01lers-ctf-2025-public"
 revision = "518df2ba8e0014cafeb767d9f57bbe449ac69972"
 path = "src/pwn/scanfun"
 license = "MIT (challenge); LGPL-2.1-or-later and additional notices (bundled GNU libc)"
-original = "private/original/chal.json"
-original_sha256 = "1201900c143ef306280f15920b44a68a913290a53ebddc8a9dde59d2e2a65c6e"
 archive_sha256 = "d92406fad5fb3b15fb98fefa3e376fedb997f73934a9b1bf0137aed79c659596"
 
 [metadata.ariadne.service_limits]

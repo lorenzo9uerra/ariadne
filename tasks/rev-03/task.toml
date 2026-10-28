@@ -39,8 +39,6 @@ repository = "https://github.com/b01lers/b01lers-ctf-2026-public"
 revision = "6890cf1035a9e2c3dd4817d11204619bfd0259b4"
 path = "src/rev/favorite_potato"
 license = "MIT"
-original = "private/original/favorite_potato.zip"
-original_sha256 = "309465b9dd9eb01a0395b09875a02a17375c3960be23a16a8cf505932ec2d2d8"
 
 [metadata.ariadne.service_limits]
 cpus = 1.0

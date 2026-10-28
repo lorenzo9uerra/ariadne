@@ -36,8 +36,6 @@ repository = "https://github.com/b01lers/b01lers-ctf-2026-public"
 revision = "6890cf1035a9e2c3dd4817d11204619bfd0259b4"
 path = "src/crypto/manytags"
 license = "MIT"
-original = "private/original/README.md"
-original_sha256 = "a5b2ba8f845927cb4b5f1068676453567e1867b3b1aef1300b0169b51aea4956"
 
 [metadata.ariadne.service_limits]
 cpus = 1.0

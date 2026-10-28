@@ -37,8 +37,6 @@ repository = "https://github.com/anthropics/claude-code"
 revision = "advisory GHSA-5j29-h97v-84ch (CVE-2026-103435)"
 path = "security/advisories/GHSA-5j29-h97v-84ch"
 license = "MIT (this implementation); the advisory documents a closed-source product"
-original = "private/original/advisory.md"
-original_sha256 = "d63b87e27ccb185b81dc32d389a9258c9e32899e0d033ad32ea068d21c95adb3"
 
 [metadata.ariadne.service_limits]
 pids = 128
