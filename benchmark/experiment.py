@@ -311,7 +311,8 @@ async def execute_job(
         job.on_trial_started(started)
         if on_trial_result is not None:
             job.on_trial_ended(ended)
-        # Harbor runs every repeat, even after one succeeds.
+        # Harbor runs every attempt in the job, even after an earlier attempt on
+        # the same task solved it, as protocol section 10 requires.
         await job.run()
         if trial_error is not None:
             raise trial_error
