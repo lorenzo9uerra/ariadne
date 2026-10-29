@@ -94,18 +94,13 @@ def test_console_errors_redraw_progress_and_keep_file_logs(tmp_path, monkeypatch
     assert job._console_handler is None
 
 
-@pytest.mark.parametrize("dev", [False, True])
-def test_job_template_uses_native_schema_and_explicit_development_mode(dev):
-    template = ROOT / ("job.dev.yaml" if dev else "job.yaml")
-    config = JobConfig.model_validate(yaml.safe_load(template.read_text()))
+def test_job_template_uses_native_schema():
+    config = JobConfig.model_validate(yaml.safe_load((ROOT / "job.yaml").read_text()))
     assert config.jobs_dir.name == "jobs"
     assert config.n_concurrent_trials == 1
-    assert config.n_attempts == (1 if dev else 3)
+    assert config.n_attempts == 3
     assert config.retry.max_retries == 0
-    if dev:
-        assert config.agents[0].name == "nop"
-    else:
-        assert config.agents[0].import_path == "benchmark.agent:AriadneAgent"
+    assert config.agents[0].import_path == "benchmark.agent:AriadneAgent"
     assert (
         config.environment.import_path == "sandbox.environment:AriadneDockerEnvironment"
     )
@@ -170,7 +165,8 @@ def test_native_job_retains_scores_and_trajectory(tmp_path, weight, milestone):
     (task / "task.toml").write_text(definition.model_dump_toml())
     config = JobConfig.model_validate(
         {
-            **yaml.safe_load((ROOT / "job.dev.yaml").read_text()),
+            **yaml.safe_load((ROOT / "job.yaml").read_text()),
+            "n_attempts": 1,
             "jobs_dir": str(tmp_path / "jobs"),
             "job_name": "native-smoke",
             "tasks": [{"path": str(task)}],

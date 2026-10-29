@@ -874,7 +874,8 @@ def test_live_reviewed_web_with_synthetic_task(tmp_path):
     )
     config = JobConfig.model_validate(
         {
-            **yaml.safe_load((ROOT / "job.dev.yaml").read_text()),
+            **yaml.safe_load((ROOT / "job.yaml").read_text()),
+            "n_attempts": 1,
             "jobs_dir": str(ROOT / "jobs"),
             "tasks": [{"path": str(task)}],
             "agents": [ariadne_agent(settings)],

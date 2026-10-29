@@ -1,5 +1,4 @@
 # Three independent attempts with the controlled agent.
-# Experiments also freeze settings; use job.dev.yaml for checks.
 n_concurrent_trials: 1
 n_attempts: 3
 retry:

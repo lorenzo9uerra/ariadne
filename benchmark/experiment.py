@@ -73,8 +73,7 @@ def job_config(
     name=None,
     attempts=None,
 ) -> JobConfig:
-    template = ROOT / ("job.dev.yaml" if dev else "job.yaml")
-    data = yaml.safe_load(template.read_text())
+    data = yaml.safe_load((ROOT / "job.yaml").read_text())
     # A dev job may carry its settings only in the agent's own config.
     settings = settings or agent.get("kwargs", {}).get("config") or load_draft()
     count = 1 if dev else settings["runs"]["independent_attempts"]

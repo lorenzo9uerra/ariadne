@@ -236,11 +236,12 @@ def test_native_job_repetitions_generate_independent_flag_instances(
     )
     config = JobConfig.model_validate(
         {
-            **yaml.safe_load((ROOT / "job.dev.yaml").read_text()),
+            **yaml.safe_load((ROOT / "job.yaml").read_text()),
             "jobs_dir": str(tmp_path / "jobs"),
             "job_name": "flag-repetitions",
             "n_attempts": 2,
             "tasks": [{"path": str(task)}],
+            "agents": [{"name": "nop"}],
         }
     )
 

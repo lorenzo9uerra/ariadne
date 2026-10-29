@@ -48,8 +48,7 @@ def harness(tmp_path, monkeypatch):
     (root / "sandbox").mkdir()
     for name in ("uv.lock", "pyproject.toml", "benchmark/draft.toml"):
         (root / name).write_text("Frozen synthetic input.\n")
-    for name in ("job.yaml", "job.dev.yaml"):
-        shutil.copyfile(ROOT / name, root / name)
+    shutil.copyfile(ROOT / "job.yaml", root / "job.yaml")
     (root / "benchmark/prompts/agent.txt").write_text("Synthetic prompt.\n")
     (root / "benchmark/prompts/triage.txt").write_text("Synthetic triage prompt.\n")
     (root / "benchmark/agent.py").write_text("# Synthetic implementation v1\n")
