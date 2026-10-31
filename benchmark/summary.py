@@ -363,7 +363,7 @@ def automatic_review(events: list[dict]) -> dict:
     human = {
         event["attempt"]: event
         for event in events
-        if event["event"] == "review" and event["reviewer"] != "autoreview-v1"
+        if event["event"] == "review" and event["reviewer"] != "autoreview"
     }
     sample = sorted(event["attempt"] for event in automatic if event["human_sample"])
     checked = [attempt for attempt in sample if attempt in human]
@@ -495,7 +495,7 @@ def summarize(folder: Path) -> dict:
         "complete": complete,
         "status": "reviewed" if complete else "incomplete_or_pending_review",
         "seed": plan["seed"],
-        "review_policy_version": "review-v2",
+        "review_policy_version": "review-v1",
         "review_basis": "AI-assisted assessments; human audits are optional",
         "runs": runs,
         **overall_scores(runs, complete),

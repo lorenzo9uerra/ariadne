@@ -528,7 +528,7 @@ def review_package(root, architecture="amd64", public_answer=False):
         },
     )
     context = {
-        "schema_version": 2,
+        "schema_version": 1,
         "context_version": "v1",
         "challenge_id": package.id,
         "answer_type": "json",

@@ -1,4 +1,4 @@
-policy_version = "solution-filter-v2"
+policy_version = "solution-filter-v1"
 
 [runs]
 independent_attempts = 3 # Run all three counted attempts, including after a solve.

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "context_version": "v5",
   "challenge_id": "crypto-01",
   "answer_type": "flag",

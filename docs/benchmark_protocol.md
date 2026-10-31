@@ -340,7 +340,7 @@ attempt that fails for reasons outside the agent, such as a provider outage
 or a sandbox that does not start, is replaced in the same slot, so there is
 never a fourth counted attempt.
 
-Every attempt is reviewed under policy **`review-v2`**, following the
+Every attempt is reviewed under policy **`review-v1`**, following the
 [review checklist](review_checklist.md):
 
 1. **Automatic checks** confirm the stop reason, that the isolation checks

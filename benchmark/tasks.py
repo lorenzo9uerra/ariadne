@@ -14,9 +14,9 @@ import sys
 import tomllib
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from benchmark.answers import inner, parse_answer, reward_weights
 from benchmark.classifiers import loads_unique
@@ -466,7 +466,8 @@ class Marker(Record):
 class ReviewerContext(Record):
     """private/reviewer_context.json: what the classifiers are told about a task."""
 
-    schema_version: Literal[2]
+    # A literal 1 would also accept true, so the version is an int pinned to 1.
+    schema_version: Annotated[int, Field(ge=1, le=1)]
     context_version: str
     challenge_id: str
     answer_type: str
