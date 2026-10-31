@@ -18,11 +18,11 @@ submits, its container is removed and a fresh verifier container grades the
 answer.
 
 <p align="center">
-  <a href="docs/architecture.svg">
+  <a href="docs/images/architecture.svg">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="docs/architecture.svg">
-      <img alt="Ariadne architecture: evaluation host and separate Docker containers" src="docs/architecture.svg" width="400">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture.svg">
+      <img alt="Ariadne architecture: evaluation host and separate Docker containers" src="docs/images/architecture.svg" width="400">
     </picture>
   </a>
 </p>

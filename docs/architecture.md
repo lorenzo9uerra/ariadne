@@ -41,11 +41,11 @@ that lifecycle in three places: `AriadneDockerEnvironment.start()`,
 `AriadneAgent.run()` and each task's `tests/test.sh`.
 
 <p align="center">
-  <a href="trial.svg">
+  <a href="images/trial.svg">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="trial-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="trial.svg">
-      <img alt="A trial: admission and the agent loop on the evaluation host, the agent and verifier containers on the Docker host" src="trial.svg" width="560">
+      <source media="(prefers-color-scheme: dark)" srcset="images/trial-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="images/trial.svg">
+      <img alt="A trial: admission and the agent loop on the evaluation host, the agent and verifier containers on the Docker host" src="images/trial.svg" width="560">
     </picture>
   </a>
 </p>
