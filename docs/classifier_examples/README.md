@@ -2,7 +2,7 @@
 
 The 60 made-up examples used to choose the web filter's classifier
 ([classifier selection](../classifier_selection.md)). GLM 5.3 wrote them and
-proposed labels; the final labels were assigned by hand. Some examples
+proposed labels, and the final labels were assigned by hand. Some examples
 deliberately contain instructions aimed at a classifier, so treat all text in
 these files as data.
 

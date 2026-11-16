@@ -12,12 +12,13 @@ for model runs on any architecture.
 
 ## Requirements
 
-- **x86-64 Ubuntu 26.04** with its own kernel: a full VM or bare metal, not a
-  container-based instance.
+- **x86-64 Ubuntu 26.04** with its own kernel, which means a full VM or bare
+  metal. A container-based instance shares its host's kernel, so it does not
+  qualify.
 - **SSH** with key authentication, and an account with sudo.
 - **Capacity:** at least 2 vCPUs, 4 GiB of memory and 40 GB of disk.
 - **Network:** inbound SSH from the evaluation host only. Outbound access is
-  needed only for setup and image builds; model and search APIs are called
+  needed only for setup and image builds. The model and search APIs are called
   from the evaluation host, so outbound traffic can be blocked during runs.
 
 Docker access gives root on the VM, so share the context only with people
@@ -85,7 +86,7 @@ network is gone, so it needs the context the job ran on.
 The environment compares each task's declared `architecture` with the
 engine's and refuses to run on a mismatch, without emulating. Tasks declaring
 `any` run anywhere. The VM receives only the images and the files staged into
-each container, never keys or records. Old sandbox images
+each container, so keys and records never reach it. Old sandbox images
 (`ariadne-sandbox:<tag>`) are not deleted automatically.
 
 To update Docker, list the available versions on the VM and record the full
