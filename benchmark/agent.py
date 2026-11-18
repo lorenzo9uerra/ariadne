@@ -448,7 +448,9 @@ class AgentAttempt:
                 capture, user="1000:1000", timeout_sec=timeout + 5
             )
         except OutputLimitExceeded:
-            self.shell_failure(error_type="OutputLimitExceeded")
+            self.shell_failure(
+                "shell_transport_error", error_type="OutputLimitExceeded"
+            )
         if result.return_code == 124:
             return json.dumps(
                 {
@@ -459,9 +461,16 @@ class AgentAttempt:
                     "stderr_truncated": False,
                 }
             )
+        if result.return_code == 255 and not result.stderr:
+            # The capture script and its timeout never exit with 255, so this
+            # code comes from the dropped connection to the Docker host.
+            self.shell_failure(
+                "docker_host_error", return_code=255, stderr="", stderr_truncated=False
+            )
         if result.return_code != 0 or result.stderr:
             stderr = result.stderr or ""
             self.shell_failure(
+                "shell_transport_error",
                 return_code=result.return_code,
                 stderr=stderr[:2048],
                 stderr_truncated=len(stderr) > 2048,
@@ -469,9 +478,9 @@ class AgentAttempt:
         try:
             return json.dumps(decode_capture(result.stdout or "", limit))
         except (ValueError, RuntimeError):
-            self.shell_failure(error_type="InvalidCapture")
+            self.shell_failure("shell_transport_error", error_type="InvalidCapture")
 
-    def shell_failure(self, **details) -> NoReturn:
+    def shell_failure(self, reason: str, **details) -> NoReturn:
         """Record why the shell's output can't be trusted, and end the attempt."""
         self.audit.record(
             "shell_transport",
@@ -479,7 +488,7 @@ class AgentAttempt:
             status="error",
             **details,
         )
-        self.session.stop_reason = "shell_transport_error"
+        self.session.stop_reason = reason
         raise PolicyStopped("Shell output capture failed") from None
 
     async def submit(self, answer: str) -> str:
