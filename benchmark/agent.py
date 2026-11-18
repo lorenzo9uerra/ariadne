@@ -461,7 +461,7 @@ class AgentAttempt:
                     "stderr_truncated": False,
                 }
             )
-        if result.return_code == 255 and not result.stderr:
+        if result.return_code == 255 and not result.stdout and not result.stderr:
             # The capture script and its timeout never exit with 255, so this
             # code comes from the dropped connection to the Docker host.
             self.shell_failure(

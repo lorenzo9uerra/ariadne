@@ -498,17 +498,18 @@ def test_bash_preserves_streams_and_reports_timeout(tmp_path, live_mock, monkeyp
 
 
 @pytest.mark.parametrize(
-    "return_code,stderr,reason",
+    "return_code,stdout,stderr,reason",
     [
-        (137, "", "shell_transport_error"),
-        (0, "x" * 3000, "shell_transport_error"),
+        (137, "", "", "shell_transport_error"),
+        (0, "", "x" * 3000, "shell_transport_error"),
         # Exit code 255 with no output is the dropped connection to the host.
-        (255, "", "docker_host_error"),
-        (255, "synthetic error", "shell_transport_error"),
+        (255, "", "", "docker_host_error"),
+        (255, "", "synthetic error", "shell_transport_error"),
+        (255, "synthetic stdout diagnostic", "", "shell_transport_error"),
     ],
 )
 def test_shell_transport_failure_retains_private_diagnostics_and_stops(
-    tmp_path, live_mock, monkeypatch, return_code, stderr, reason
+    tmp_path, live_mock, monkeypatch, return_code, stdout, stderr, reason
 ):
     config, replies, seen = live_mock
     replies.extend(
@@ -524,7 +525,7 @@ def test_shell_transport_failure_retains_private_diagnostics_and_stops(
     environment = environment_stub(tmp_path)
 
     async def execute(*args, **kwargs):
-        return ExecResult(return_code=return_code, stderr=stderr)
+        return ExecResult(return_code=return_code, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(environment, "exec", execute)
     context, trajectory = run_agent(environment, config)
