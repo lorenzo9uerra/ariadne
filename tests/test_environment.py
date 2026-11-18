@@ -27,7 +27,7 @@ from benchmark.answers import METRICS, reward_values
 from benchmark.budgets import load_draft
 from benchmark.tasks import ROOT, Package
 from benchmark.verifier import read_or_none, score
-from sandbox.checks import LIMIT_VARIABLES
+from sandbox.checks import LIMIT_VARIABLES, container_checks, docker_controls
 from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import (
     SUBMISSION_BYTES,
@@ -241,6 +241,67 @@ def test_target_seccomp_verification_compares_contents(option):
     }
     expected = option is not None and '"SCMP_ACT_ERRNO"' in option
     assert environment._target_seccomp_applied(details) is expected
+
+
+def isolated_container() -> dict:
+    """Synthetic `docker inspect` output for a container that passes every check."""
+    return {
+        "Config": {"User": "1000:1000", "Hostname": "workspace", "Env": ["LANG=C"]},
+        "AppArmorProfile": "docker-default",
+        "HostConfig": {
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges:true"],
+            "PidMode": "",
+            "IpcMode": "private",
+            "UsernsMode": "",
+            "UTSMode": "",
+            "CgroupnsMode": "private",
+            "Devices": [],
+            "ReadonlyRootfs": True,
+            "Binds": None,
+            "Tmpfs": {"/workspace": "size=1024", "/tmp": "size=1024"},
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "Memory": 1024,
+            "MemorySwap": 1024,
+            "NanoCpus": 1_000_000_000,
+            "PidsLimit": 128,
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Ports": {}},
+    }
+
+
+@pytest.mark.parametrize(
+    "change,failed",
+    [
+        (lambda d: d["HostConfig"].update(Devices=["/dev/kvm"]), "no_added_devices"),
+        (
+            lambda d: d["HostConfig"]["SecurityOpt"].append("apparmor=unconfined"),
+            "only_known_security_options",
+        ),
+        (
+            lambda d: d["HostConfig"]["SecurityOpt"].append("systempaths=unconfined"),
+            "only_known_security_options",
+        ),
+        (lambda d: d.update(AppArmorProfile="unconfined"), "apparmor_confined"),
+        (lambda d: d["HostConfig"].update(CgroupnsMode="host"), "no_host_namespaces"),
+        (lambda d: d["HostConfig"].update(UTSMode="host"), "no_host_namespaces"),
+        (
+            lambda d: d["Config"]["Env"].append("COPIED=synthetic-host-secret-value"),
+            "no_host_secrets",
+        ),
+    ],
+)
+def test_container_checks_catch_weakened_settings(monkeypatch, change, failed):
+    monkeypatch.setenv("SYNTHETIC_API_KEY", "synthetic-host-secret-value")
+    details = isolated_container()
+    assert all(container_checks(docker_controls(details), None).values())
+    change(details)
+    checks = container_checks(docker_controls(details), None)
+    assert [name for name, passed in checks.items() if not passed] == [failed]
 
 
 @pytest.mark.parametrize(

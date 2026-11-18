@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import os
+import re
 import shlex
 import subprocess
 import time
@@ -71,10 +73,14 @@ class Controls:
     capabilities_added: list[str]
     no_new_privileges: bool
     custom_seccomp: bool
-    # Namespace modes for pid, ipc and userns. "" or "private" means its own.
+    security_options: list[str]
+    apparmor_profile: str
+    # Namespace modes for pid, ipc, userns, uts and cgroup. "" or "private"
+    # means its own.
     namespaces: dict[str, str]
     has_devices: bool
     hostname: str
+    environment: list[str]  # "NAME=value" entries.
 
     # Filesystem
     read_only_root: bool
@@ -132,6 +138,19 @@ def limit_reference(key: str) -> str:
     return f"${{{LIMIT_VARIABLES[key]}:?set by the secure environment}}"
 
 
+# Host variables whose values must never appear in a container.
+SECRET_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.IGNORECASE)
+
+
+def host_secrets() -> list[str]:
+    """Values of the evaluation host's secret-looking environment variables."""
+    return [
+        value
+        for name, value in os.environ.items()
+        if SECRET_NAME.search(name) and len(value) >= 16
+    ]
+
+
 def tmpfs_size(options: str) -> int | None:
     """The size in bytes from tmpfs options such as "rw,size=65536"."""
     for option in options.split(","):
@@ -156,15 +175,18 @@ def docker_controls(details: dict) -> Controls:
         custom_seccomp=any(
             option.startswith(("seccomp=", "seccomp:")) for option in security_options
         ),
+        security_options=security_options,
+        apparmor_profile=details.get("AppArmorProfile") or "",
         namespaces={
             field: host.get(field) or ""
-            for field in ("PidMode", "IpcMode", "UsernsMode")
+            for field in ("PidMode", "IpcMode", "UsernsMode", "UTSMode", "CgroupnsMode")
         },
         has_devices=any(
             host.get(field)
             for field in ("Devices", "DeviceRequests", "DeviceCgroupRules")
         ),
         hostname=config["Hostname"],
+        environment=config.get("Env") or [],
         read_only_root=host["ReadonlyRootfs"],
         bind_mounts=host["Binds"] or [],
         tmpfs={path: tmpfs_size(options) for path, options in host["Tmpfs"].items()},
@@ -201,7 +223,21 @@ def container_checks(
         "all_capabilities_dropped": controls.capabilities_dropped == ["ALL"]
         and not controls.capabilities_added,
         "no_new_privileges": controls.no_new_privileges,
+        # Options such as apparmor=unconfined or systempaths=unconfined would
+        # lift a default restriction. A custom seccomp profile is checked
+        # separately, against the one each container may use.
+        "only_known_security_options": all(
+            option.startswith(("no-new-privileges", "seccomp=", "seccomp:"))
+            for option in controls.security_options
+        ),
+        "apparmor_confined": controls.apparmor_profile != "unconfined",
         "no_host_namespaces": "host" not in controls.namespaces.values(),
+        "no_added_devices": not controls.has_devices,
+        "no_host_secrets": not any(
+            secret in entry
+            for secret in host_secrets()
+            for entry in controls.environment
+        ),
         "root_filesystem_read_only": controls.read_only_root,
         "only_ephemeral_mounts": not controls.bind_mounts
         and set(controls.tmpfs) == mounts
@@ -235,7 +271,6 @@ def container_checks(
         separate_namespaces=all(
             mode in ("", "private") for mode in controls.namespaces.values()
         ),
-        no_added_devices=not controls.has_devices,
         no_host_aliases=not controls.extra_hosts,
         external_dns_disabled=controls.dns == ["127.0.0.1"],
         ipv6_disabled=all(
