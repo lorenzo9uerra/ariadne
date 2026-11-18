@@ -901,7 +901,11 @@ def test_cli_docker_context_option_selects_the_docker_host(
     harness, tmp_path, monkeypatch
 ):
     seen = []
-    monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
+    # The CLI sets DOCKER_CONTEXT for the rest of the process. Setting it here
+    # first makes pytest remove it when this test ends, so later tests use the
+    # default Docker host instead of the made-up "remote-vm" context.
+    monkeypatch.setenv("DOCKER_CONTEXT", "")
+    monkeypatch.delenv("DOCKER_CONTEXT")
     monkeypatch.setattr(cli, "load_package", lambda path: harness[0])
     monkeypatch.setattr(
         cli,
