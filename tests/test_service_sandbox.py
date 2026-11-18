@@ -156,6 +156,8 @@ def assert_service_cleanup(path, verifier=True):
         assert record["cleanup_requested"]
         identifiers = [("container", record["container_id"])]
         if "target_container_id" in record:
+            # The target's state is recorded before the containers are removed.
+            assert record["target_final_state"]["status"] != "unrecorded"
             identifiers.extend(
                 [
                     ("container", record["target_container_id"]),
@@ -270,6 +272,7 @@ def test_service_access_fresh_flags_and_separate_grading(tmp_path):
         records = assert_service_cleanup(path)
         agent = next(record for record in records if "target_container_id" in record)
         assert agent["target_flag_staged"]
+        assert agent["target_final_state"]["status"] == "running"
         assert agent["service_ready_seconds"] >= 0
         assert agent["checks"]["main_network_denials"]
         assert agent["checks"]["target_network_denials"]
