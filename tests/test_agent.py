@@ -498,18 +498,22 @@ def test_bash_preserves_streams_and_reports_timeout(tmp_path, live_mock, monkeyp
 
 
 @pytest.mark.parametrize(
-    "return_code,stdout,stderr,reason",
+    "return_code,stdout,stderr,running,reason",
     [
-        (137, "", "", "shell_transport_error"),
-        (0, "", "x" * 3000, "shell_transport_error"),
-        # Exit code 255 with no output is the dropped connection to the host.
-        (255, "", "", "docker_host_error"),
-        (255, "", "synthetic error", "shell_transport_error"),
-        (255, "synthetic stdout diagnostic", "", "shell_transport_error"),
+        (137, "", "", True, "shell_transport_error"),
+        (0, "", "x" * 3000, True, "shell_transport_error"),
+        # Exit code 255 with no output is the dropped connection to the host,
+        # whether or not Docker can answer afterwards.
+        (255, "", "", True, "docker_host_error"),
+        (255, "", "", None, "docker_host_error"),
+        # The agent can stop its own container, so that is not the host.
+        (255, "", "", False, "shell_transport_error"),
+        (255, "", "synthetic error", True, "shell_transport_error"),
+        (255, "synthetic stdout diagnostic", "", True, "shell_transport_error"),
     ],
 )
 def test_shell_transport_failure_retains_private_diagnostics_and_stops(
-    tmp_path, live_mock, monkeypatch, return_code, stdout, stderr, reason
+    tmp_path, live_mock, monkeypatch, return_code, stdout, stderr, running, reason
 ):
     config, replies, seen = live_mock
     replies.extend(
@@ -527,7 +531,11 @@ def test_shell_transport_failure_retains_private_diagnostics_and_stops(
     async def execute(*args, **kwargs):
         return ExecResult(return_code=return_code, stdout=stdout, stderr=stderr)
 
+    async def container_running():
+        return running
+
     monkeypatch.setattr(environment, "exec", execute)
+    monkeypatch.setattr(environment, "container_running", container_running)
     context, trajectory = run_agent(environment, config)
     assert context.metadata["stop_reason"] == reason
     assert context.metadata["submission_attempted"] is False

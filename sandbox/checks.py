@@ -141,8 +141,10 @@ def limit_reference(key: str) -> str:
     return f"${{{LIMIT_VARIABLES[key]}:?set by the secure environment}}"
 
 
-# Host variables whose values must never appear in a container.
-SECRET_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.IGNORECASE)
+# Host variables whose values must never appear in a container: names that
+# end like a credential, such as OPENROUTER_API_KEY or GITHUB_TOKEN, so that a
+# path in a variable like SSH_KEY_DIR is not mistaken for one.
+SECRET_NAME = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)$", re.IGNORECASE)
 # The agent loads the API keys from .env only after the sandbox starts.
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
@@ -161,15 +163,21 @@ def host_secrets() -> list[str]:
 # these. Compose would fill any other $NAME from the host's environment,
 # which holds the API keys.
 COMPOSE_VARIABLES = {*LIMIT_VARIABLES.values(), "SANDBOX_PLATFORM", "SANDBOX_IMAGE_TAG"}
-# Compose substitutes $NAME and ${NAME...}; $$ is a literal dollar sign.
+# Compose substitutes $NAME and ${NAME...}, and $$ is a literal dollar sign.
+# Matching $$ first, from left to right, reads $$$NAME as a dollar sign
+# followed by a substitution, as Compose does.
 SUBSTITUTION = re.compile(
-    r"(?<!\$)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))"
+    r"\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)|\$([A-Za-z_][A-Za-z0-9_]*)"
 )
 
 
 def compose_substitutions(text: str) -> set[str]:
     """The variable names a compose file asks Compose to substitute."""
-    return {braced or plain for braced, plain in SUBSTITUTION.findall(text)}
+    return {
+        braced or plain
+        for braced, plain in SUBSTITUTION.findall(text)
+        if braced or plain
+    }
 
 
 def bridge_gateways() -> list[str]:
