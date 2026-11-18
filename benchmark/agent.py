@@ -461,9 +461,15 @@ class AgentAttempt:
                     "stderr_truncated": False,
                 }
             )
-        if result.return_code == 255 and not result.stdout and not result.stderr:
-            # The capture script and its timeout never exit with 255, so this
-            # code comes from the dropped connection to the Docker host.
+        # The capture script and its timeout never exit with 255, so this code
+        # comes from the connection to the Docker host. A stopped container is
+        # different: the agent can stop it, so that ending is not replaced.
+        if (
+            result.return_code == 255
+            and not result.stdout
+            and not result.stderr
+            and await self.environment.container_running() is not False
+        ):
             self.shell_failure(
                 "docker_host_error", return_code=255, stderr="", stderr_truncated=False
             )
