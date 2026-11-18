@@ -1,0 +1,81 @@
+name: Docker tests
+
+# The tests that build the sandbox image and start real containers, on the
+# Docker versions pinned for the benchmark VM. They take much longer than the
+# default checks, so they run on request and on pull requests that change the
+# harness, the sandbox or the tasks.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "benchmark/**"
+      - "sandbox/**"
+      - "tasks/**"
+      - "tests/**"
+      - "infra/ansible/versions.yml"
+      - "job.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    # The same Ubuntu release as the benchmark VM (infra/ansible/versions.yml).
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    env:
+      RUN_DOCKER: "1"
+      RUN_LIVE: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the runner's Ubuntu release
+        run: |
+          expected=$(sed -n 's/^ubuntu_release: "\(.*\)"$/\1/p' infra/ansible/versions.yml)
+          . /etc/os-release
+          test "$VERSION_ID" = "$expected"
+      - name: Free disk space for the sandbox image
+        # The image is about 7 GB, and the runner's preinstalled toolchains
+        # leave too little room to build it.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Install the pinned Docker versions
+        run: |
+          packages=$(sed -n 's/^  \([a-z.-]*\): "\(.*\)"$/\1=\2/p' infra/ansible/versions.yml)
+          test "$(echo "$packages" | wc -l)" -eq 5
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+            -o /etc/apt/keyrings/docker.asc
+          # Replace any Docker repository the runner image declares.
+          sudo rm -f /etc/apt/sources.list.d/docker*
+          . /etc/os-release
+          printf '%s\n' "Types: deb" \
+            "URIs: https://download.docker.com/linux/ubuntu" \
+            "Suites: $VERSION_CODENAME" "Components: stable" \
+            "Architectures: amd64" "Signed-By: /etc/apt/keyrings/docker.asc" \
+            | sudo tee /etc/apt/sources.list.d/ariadne-docker.sources
+          sudo apt-get update
+          sudo apt-get install -y --allow-downgrades $packages
+          sudo systemctl restart docker
+          docker version --format '{{.Server.Version}}'
+          docker compose version --short
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.23"
+          enable-cache: false
+      - name: Install Python and dependencies
+        run: |
+          uv python install
+          uv sync --locked
+      - name: Run the tests with Docker
+        run: uv run --no-sync pytest -q --tb=short
