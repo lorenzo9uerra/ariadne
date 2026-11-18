@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - ".github/workflows/docker.yml"
       - "benchmark/**"
       - "sandbox/**"
       - "tasks/**"
