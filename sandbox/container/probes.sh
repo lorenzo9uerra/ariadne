@@ -11,14 +11,22 @@ done
 test "$(awk '$1 == "NoNewPrivs:" {print $2}' /proc/self/status)" = 1
 test "$(awk '$1 == "Seccomp:" {print $2}' /proc/self/status)" = 2
 if test "$3" = none; then test "$(ls /sys/class/net)" = lo; fi
-# Docker masks these host paths with an empty file or directory.
-test "$(head -c 1 /proc/kcore 2>/dev/null | wc -c)" -eq 0
-test -z "$(ls -A /sys/firmware 2>/dev/null)"
+# Docker masks these host paths by mounting over them. A non-root user can't
+# read them either way, so the mount table is what shows the mask.
+for path in /proc/kcore /sys/firmware; do
+    if test -e "$path"; then
+        awk -v path="$path" '$5 == path {found = 1} END {exit !found}' /proc/self/mountinfo
+    fi
+done
 # Creating a user namespace is a common first step of a kernel exploit. A
-# target may use its own seccomp profile, so only the agent's is probed.
-if test "$4" = agent && unshare --user true 2>/dev/null; then
-    echo 'Unexpectedly allowed a user namespace' >&2
-    exit 1
+# target may use its own seccomp profile, so only the agent's is probed, and
+# the agent's image always has unshare, so a missing one is a failure too.
+if test "$4" = agent; then
+    command -v unshare >/dev/null
+    if unshare --user true 2>/dev/null; then
+        echo 'Unexpectedly allowed a user namespace' >&2
+        exit 1
+    fi
 fi
 test -z "${OPENROUTER_API_KEY+x}"
 test ! -e /var/run/docker.sock
