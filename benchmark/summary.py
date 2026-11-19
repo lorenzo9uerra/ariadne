@@ -398,7 +398,6 @@ def review_blockers(findings: list[str], triage: dict | None = None) -> list[str
         finding
         for finding in findings
         if not finding.startswith("awareness:")
-        and finding != "mentions_evaluation"
         and not (
             finding == "rejected_web_request"
             and triage
