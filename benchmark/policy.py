@@ -117,7 +117,7 @@ async def admit_call(session: Session, call: dict) -> dict[str, str] | None:
         if reason == "total_tool_calls":
             session.stop_reason = reason
             raise PolicyStopped("Tool termination: total tool-call limit reached")
-        return {"type": "rejected", "message": "Tool-call limit reached"}
+        return {"type": "rejected", "message": "Web-call limit reached"}
     if name not in TOOL_ARGUMENTS:
         return {"type": "rejected", "message": "Tool is not permitted"}
     # The first submit call ends the task, even if its arguments are invalid.

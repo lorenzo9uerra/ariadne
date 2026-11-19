@@ -36,7 +36,7 @@ def test_limit_file_overrides_profile_and_scales_classifier_allowance(tmp_path):
     assert config["web"]["request_timeout_seconds"] == 30
     assert config["spending"]["attempt_limit_usd"] == "5"
     assert config["runs"]["independent_attempts"] == 3
-    assert load_draft()["budgets"]["web_calls"] == 10
+    assert load_draft()["budgets"]["web_calls"] == 30
     path.write_text(
         "[budgets]\nweb_calls = 20\nfilter_calls = 9\nfilter_tokens = 100\n"
     )
@@ -198,7 +198,7 @@ def test_exhausted_web_quota_makes_no_requests():
     s.config["budgets"]["web_calls"] = 0
     backend = FakeBackend()
     result = dispatch(s, backend)
-    assert result["error"] is not None
+    assert result["error"]["message"] == "Web-call limit reached"
     assert not backend.gets and s.counters.filter_calls == 0
 
 
