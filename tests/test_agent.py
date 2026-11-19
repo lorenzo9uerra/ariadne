@@ -285,7 +285,7 @@ def test_classifier_failure_stops_before_retrieval_and_records_raw_response(
 
 
 def test_web_budget_rejection_never_calls_backend(tmp_path, live_mock, filtered_web):
-    config, replies, _ = live_mock
+    config, replies, seen = live_mock
     config["budgets"]["web_calls"] = 1
     _, classifier_requests, backend = filtered_web
     replies.extend(
@@ -306,6 +306,9 @@ def test_web_budget_rejection_never_calls_backend(tmp_path, live_mock, filtered_
     context, _ = run_agent(environment, config)
     assert backend.searches and not backend.gets and len(classifier_requests) == 2
     assert context.metadata["web_proposals"] == 2
+    assert "Web-call limit reached" in json.dumps(seen[1]["messages"])
+    assert " 1 web calls," in seen[0]["messages"][-1]["content"]
+    assert " 0 web calls," in seen[1]["messages"][-1]["content"]
 
 
 def test_web_delivery_guard_blocks_unreviewed_wrapper_output(
@@ -473,6 +476,10 @@ def test_turn_limit_and_tool_schemas(tmp_path, live_mock):
         "web_search",
         "web_fetch",
     }
+    fetch = next(t for t in seen[0]["tools"] if t["function"]["name"] == "web_fetch")
+    parameters = fetch["function"]["parameters"]
+    assert parameters["required"] == ["url"]
+    assert parameters["properties"]["offset"]["type"] == "integer"
     assert "synthetic-key" not in json.dumps(seen)
 
 

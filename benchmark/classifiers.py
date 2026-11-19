@@ -101,7 +101,9 @@ def encoding() -> tiktoken.Encoding:
 
 
 def tokens(text: str) -> int:
-    return len(encoding().encode(text))
+    # Page text can contain literal special tokens such as <|endoftext|>, which
+    # are counted as ordinary text.
+    return len(encoding().encode(text, disallowed_special=()))
 
 
 def chat_schema() -> dict:

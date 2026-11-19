@@ -59,6 +59,9 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/ariadne-docker.sources
           sudo apt-get update
           sudo apt-get install -y --allow-downgrades $packages
+          # Replacing the packages restarts Docker several times, which can
+          # hit systemd's start limit, so clear the count before restarting.
+          sudo systemctl reset-failed docker.service
           sudo systemctl restart docker
           docker version --format '{{.Server.Version}}'
           docker compose version --short
