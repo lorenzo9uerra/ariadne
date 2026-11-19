@@ -20,7 +20,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 
 from benchmark.audit import AuditTrail
-from benchmark.classifiers import tokens
+from benchmark.classifiers import escape, tokens
 from benchmark.costs import (
     AttemptSpendingLimit,
     CostAccountingError,
@@ -287,11 +287,18 @@ def web_fetch(session: Session, backend: Backend):
 def page_part(text: str, offset: int, max_chars: int, max_tokens: int) -> str:
     """One part of a page, with a note saying where it sits when the page is longer.
 
-    The part holds at most max_chars characters and max_tokens tokens, so a
-    dense page still fits the classifier's input limit.
+    The part holds at most max_chars characters and max_tokens tokens, counted
+    as the classifier receives it, JSON-encoded and escaped, so a dense or
+    escape-heavy page still fits the classifier's input limit.
     """
+
+    def size(end: int) -> int:
+        return tokens(escape(json.dumps(text[offset:end], ensure_ascii=False)))
+
     end = min(len(text), offset + max_chars)
-    while end > offset and (count := tokens(text[offset:end])) > max_tokens:
+    # Shrink in proportion until the part fits. One character is the smallest
+    # part, so a character too large for max_tokens cannot loop forever.
+    while end - offset > 1 and (count := size(end)) > max_tokens:
         end = offset + max(1, (end - offset) * max_tokens * 9 // (count * 10))
     part = text[offset:end]
     if offset == 0 and end >= len(text):
