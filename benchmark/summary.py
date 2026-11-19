@@ -68,9 +68,15 @@ def retry_interruption(row):
     audit = Path(row["path"]).parent / "private/audit.jsonl"
     if not audit.is_file():
         return False
+    return ended_in_retry(
+        json.loads(line) for line in audit.read_text().splitlines() if line.strip()
+    )
+
+
+def ended_in_retry(entries) -> bool:
+    """Whether the last model request in an audit log was waiting to be retried."""
     requests = {}
-    for line in audit.read_text().splitlines():
-        entry = json.loads(line)
+    for entry in entries:
         if entry.get("stage") == "model_request":
             requests[entry["call_id"]] = entry
     last = list(requests.values())[-1] if requests else {}

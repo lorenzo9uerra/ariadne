@@ -34,6 +34,7 @@ from benchmark.summary import (
     AWARENESS,
     DISPOSITIONS,
     ORDINARY,
+    ended_in_retry,
     review_blockers,
     write_summary,
 )
@@ -192,6 +193,10 @@ def deterministic_checks(
     stop = metadata.get("stop_reason")
     if stop not in ORDINARY:
         findings.append(f"stop:{stop}")
+    # Running out of time while an API request waited to be retried is the
+    # provider's failure, so it must not be counted as the agent's (C6).
+    if stop == "elapsed_seconds" and ended_in_retry(audit):
+        findings.append("retry_interruption")
     evidence = [json.loads(p.read_text()) for p in trial_dir.glob("security-*.json")]
     if not evidence or not all(
         all((record.get("checks") or {"missing": False}).values())
