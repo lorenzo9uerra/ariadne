@@ -260,7 +260,7 @@ def test_unverified_live_classifier_response_never_reaches_backend(tmp_path, cha
     elif change == "usage":
         data["usage"]["prompt_tokens"] = True
     else:
-        data["usage"]["prompt_tokens"] = 16385
+        data["usage"]["prompt_tokens"] = 32769
     result, session, _, ledger, backend = live_fetch(
         tmp_path, lambda n: httpx.Response(200, json=data)
     )

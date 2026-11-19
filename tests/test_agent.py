@@ -476,6 +476,10 @@ def test_turn_limit_and_tool_schemas(tmp_path, live_mock):
         "web_search",
         "web_fetch",
     }
+    fetch = next(t for t in seen[0]["tools"] if t["function"]["name"] == "web_fetch")
+    parameters = fetch["function"]["parameters"]
+    assert parameters["required"] == ["url"]
+    assert parameters["properties"]["offset"]["type"] == "integer"
     assert "synthetic-key" not in json.dumps(seen)
 
 

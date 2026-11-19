@@ -25,6 +25,16 @@ TOOL_ARGUMENTS = {
     "web_search": "query",
     "web_fetch": "url",
 }
+# Optional integer arguments: web_fetch reads a long page in parts.
+OPTIONAL_ARGUMENTS = {
+    "web_fetch": {
+        "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Character position to start reading from, for the next part of a long page.",
+        }
+    }
+}
 # The tool call currently running. Web tools read it through Session.active_id,
 # so their checks and deliveries are recorded against the right call without
 # passing its id through every function.
@@ -135,10 +145,20 @@ async def admit_call(session: Session, call: dict) -> dict[str, str] | None:
         }
     field = TOOL_ARGUMENTS[name]
     value = call["arguments"].get(field)
-    if set(call["arguments"]) != {field} or not isinstance(value, str):
+    optional = OPTIONAL_ARGUMENTS.get(name, {})
+    extra = set(call["arguments"]) - {field}
+    if (
+        not isinstance(value, str)
+        or not extra <= set(optional)
+        or any(
+            type(call["arguments"][key]) is not int or call["arguments"][key] < 0
+            for key in extra
+        )
+    ):
+        allowed = "".join(f" and an optional integer {key}" for key in optional)
         return {
             "type": "invalid_arguments",
-            "message": f"{name} requires exactly one string argument: {field}",
+            "message": f"{name} requires one string argument: {field}{allowed}",
         }
     if name == "bash" and not value.strip():
         return {
