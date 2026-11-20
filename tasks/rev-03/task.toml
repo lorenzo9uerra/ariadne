@@ -48,9 +48,9 @@ pids = 128
 
 [metadata.ariadne.source.sha256]
 "files/code.bin.gz" = "360bd7d808142f9b2e39f2b2961e2f57219824c38fd1388e1d1adfa2bd90adfc"
-"files/favorite_potato.py" = "87cc1d83510cc1fe8644afb03f8a868c3de73c41108d9dfc9e2d30b24a68ace8"
+"files/program.py" = "87cc1d83510cc1fe8644afb03f8a868c3de73c41108d9dfc9e2d30b24a68ace8"
 "files/screenshot.png" = "a12499eabd9e930359e4a75debece5e209c36f06d26de4ae4cb1db511828be40"
-"files/test.bin" = "32c8390b67b68a9525c03017c6117e396508b2b8dceebefc365f17fe764b8d3b"
+"files/example.bin" = "32c8390b67b68a9525c03017c6117e396508b2b8dceebefc365f17fe764b8d3b"
 
 [verifier]
 network_mode = "no-network"
