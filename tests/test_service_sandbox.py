@@ -25,6 +25,7 @@ from sandbox.docker_host import ensure_image, select_platform
 from sandbox.environment import AriadneDockerEnvironment
 from tests.support import (
     ScriptedAgent,
+    assert_isolation_and_cleanup,
     configure_service_environment,
     native_flag_task,
     run_trial,
@@ -148,30 +149,6 @@ def test_provider_rejects_unrelated_allowlists(hosts):
         environment.validate_network_policy_support(policy)
 
 
-def assert_service_cleanup(path, verifier=True):
-    records = [json.loads(file.read_text()) for file in path.glob("security-*.json")]
-    assert len(records) == (2 if verifier else 1)
-    for record in records:
-        assert all(record["checks"].values())
-        assert record["cleanup_requested"]
-        identifiers = [("container", record["container_id"])]
-        if "target_container_id" in record:
-            # The target's state is recorded before the containers are removed.
-            assert record["target_final_state"]["status"] != "unrecorded"
-            identifiers.extend(
-                [
-                    ("container", record["target_container_id"]),
-                    ("network", record["network_id"]),
-                ]
-            )
-        for kind, identifier in identifiers:
-            inspected = subprocess.run(
-                ["docker", kind, "inspect", identifier], capture_output=True, timeout=15
-            )
-            assert inspected.returncode != 0
-    return records
-
-
 @DOCKER
 def test_target_seccomp_profile_is_transported_and_verified(tmp_path):
     platform = select_platform("any")
@@ -269,7 +246,7 @@ def test_service_access_fresh_flags_and_separate_grading(tmp_path):
         targets.append(
             read_trial_instance(load_package(task), path, str(result.id)).target
         )
-        records = assert_service_cleanup(path)
+        records = assert_isolation_and_cleanup(path)
         agent = next(record for record in records if "target_container_id" in record)
         assert agent["target_flag_staged"]
         assert agent["target_final_state"]["status"] == "running"
@@ -352,7 +329,7 @@ def test_service_trials_cannot_connect_to_each_other(tmp_path, monkeypatch):
         assert result.exception_info is None
         assert result.verifier_result is not None
         assert result.verifier_result.rewards == reward_values({"flag_correct": 1})
-        assert_service_cleanup(path)
+        assert_isolation_and_cleanup(path)
 
 
 @DOCKER
@@ -368,4 +345,4 @@ def test_service_readiness_failure_prevents_agent_execution_and_cleans_up(
     result, path = asyncio.run(run_trial(task, tmp_path / "trials", "flag{wrong}"))
     assert result.exception_info is not None
     assert not (path / "agent/trajectory.json").exists()
-    assert_service_cleanup(path, verifier=False)
+    assert_isolation_and_cleanup(path, verifier=False)

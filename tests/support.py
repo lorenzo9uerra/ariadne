@@ -581,19 +581,28 @@ def export_review_task(package, destination, image, platform):
     return task
 
 
-def assert_isolation_and_cleanup(path: Path):
+def assert_isolation_and_cleanup(path: Path, verifier=True):
+    """Every isolation check passed and every container and network is gone,
+    including a service task's target and its network."""
     records = [json.loads(file.read_text()) for file in path.glob("security-*.json")]
-    assert len(records) == 2
-    assert len({record["container_id"] for record in records}) == 2
+    assert len(records) == (2 if verifier else 1)
+    assert len({record["container_id"] for record in records}) == len(records)
     for record in records:
         assert all(record["checks"].values())
         assert record["cleanup_requested"]
-        result = subprocess.run(
-            ["docker", "container", "inspect", record["container_id"]],
-            capture_output=True,
-            timeout=15,
-        )
-        assert result.returncode != 0
+        identifiers = [("container", record["container_id"])]
+        if "target_container_id" in record:
+            # The target's state is recorded before the containers are removed.
+            assert record["target_final_state"]["status"] != "unrecorded"
+            identifiers += [
+                ("container", record["target_container_id"]),
+                ("network", record["network_id"]),
+            ]
+        for kind, identifier in identifiers:
+            inspected = subprocess.run(
+                ["docker", kind, "inspect", identifier], capture_output=True, timeout=15
+            )
+            assert inspected.returncode != 0
     return records
 
 
