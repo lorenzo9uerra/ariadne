@@ -968,7 +968,11 @@ def test_exported_files_come_back_whole_or_not_at_all(tree, limit, special):
 
 
 @settings(max_examples=min(settings().max_examples, 200))
-@given(st.dictionaries(NAME, st.binary(max_size=300) | st.just(b"\x7fELF\x02")))
+@given(
+    st.dictionaries(
+        NAME, st.binary(max_size=300) | st.just(b"\x7fELF\x02"), max_size=20
+    )
+)
 def test_uploaded_files_arrive_whole_and_handout_binaries_executable(files):
     script = ROOT / "sandbox/container/upload.py"
     payload = {name: base64.b64encode(data).decode() for name, data in files.items()}
@@ -1016,7 +1020,9 @@ UNTRUSTED = st.text("ab./\\\x00 ", max_size=10) | st.sampled_from(
 
 @given(
     st.dictionaries(
-        UNTRUSTED, st.binary(max_size=64) | st.just(b"x" * (SUBMISSION_BYTES + 1))
+        UNTRUSTED,
+        st.binary(max_size=64) | st.just(b"x" * (SUBMISSION_BYTES + 1)),
+        max_size=70,
     ),
     st.booleans(),
     st.booleans(),
@@ -1026,6 +1032,7 @@ UNTRUSTED = st.text("ab./\\\x00 ", max_size=10) | st.sampled_from(
 @example({"submission.json": b"x" * (SUBMISSION_BYTES + 1)}, True, False)
 @example({"submission.json": b""}, True, True)
 @example({"session/../../x": b""}, False, False)
+@example({f"file{n}": b"" for n in range(65)}, False, False)  # Too many files.
 def test_the_host_accepts_an_export_only_with_safe_names_within_its_limit(
     record, submission, corrupt
 ):
@@ -1040,6 +1047,7 @@ def test_the_host_accepts_an_export_only_with_safe_names_within_its_limit(
         and sum(map(len, record.values()))
         <= (SUBMISSION_BYTES if submission else LOG_BYTES)
         and not (corrupt and record)
+        and len(record) <= 64
     )
     if accepted:
         assert decode_export(json.dumps(encoded), submission) == record
@@ -1133,3 +1141,25 @@ def substitutions(text: str) -> set[str]:
 @example("cpus: ${ARIADNE_CPUS:?set} command: echo $$HOME $$$TAVILY_API_KEY")
 def test_compose_substitutions_follow_composes_rules(text):
     assert checks.compose_substitutions(text) == substitutions(text)
+
+
+@settings(max_examples=min(settings().max_examples, 100))
+@given(
+    st.binary(max_size=SUBMISSION_BYTES + 10),
+    st.none() | NAME.filter(lambda name: name != "submission.json"),
+)
+def test_a_submission_export_holds_only_the_submission_within_its_limit(data, extra):
+    with tempfile.TemporaryDirectory() as folder:
+        logs = Path(folder)
+        (logs / "artifacts").mkdir()
+        (logs / "artifacts/submission.json").write_bytes(data)
+        if extra is not None:
+            (logs / "artifacts" / extra).write_bytes(b"other file")
+        result = run_export(logs, "artifacts", SUBMISSION_BYTES, submission=True)
+    if extra is None and len(data) <= SUBMISSION_BYTES:
+        assert result.returncode == 0, result.stderr
+        assert decode_export(result.stdout, submission=True) == {
+            "submission.json": data
+        }
+    else:
+        assert result.returncode != 0
