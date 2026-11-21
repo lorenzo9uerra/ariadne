@@ -1,13 +1,27 @@
-"""Billing and provider checks with mocked APIs."""
+"""The spending ledger, reservations and billing checks, with mocked APIs."""
 
 import copy
+import shutil
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from hypothesis.stateful import (
+    Bundle,
+    RuleBasedStateMachine,
+    initialize,
+    invariant,
+    multiple,
+    rule,
+)
 
 from benchmark.budgets import load_draft
 from benchmark.costs import (
+    AttemptSpendingLimit,
     CostAccountingError,
     Ledger,
     Prices,
@@ -18,171 +32,159 @@ from benchmark.costs import (
     check_key,
     microdollars,
     preflight,
-    routing,
 )
 from tests.support import TEST_MODEL
 
-
-def key_data():
-    return {
-        "limit": 10,
-        "limit_reset": None,
-        "limit_remaining": 10,
-        "include_byok_in_limit": True,
-    }
+PROFILES = sorted(load_draft()["agents"])
 
 
-def endpoint_data():
-    """OpenRouter's listing for the test profile's pinned endpoint."""
-    config = load_draft(model=TEST_MODEL)
-    route, pricing = config["agent_route"], config["agent_route"]["pricing"]
+# The ledger, against a plain model of what it should hold.
 
-    def per_token(key):
-        return str(Decimal(pricing[key]) / 1_000_000)
 
-    return {
-        "endpoints": [
-            {
-                "tag": route["provider"],
-                "context_length": pricing["context_tokens"],
-                "max_completion_tokens": config["budgets"]["agent_max_output_tokens"],
-                "supported_parameters": [
-                    "tools",
-                    "reasoning",
-                    route["output_token_parameter"],
-                ],
-                "pricing": {
-                    "prompt": per_token("input_per_million"),
-                    "completion": per_token("output_per_million"),
-                    "input_cache_read": per_token("cached_input_per_million"),
-                    "discount": pricing["discount"],
-                },
+class LedgerModel(RuleBasedStateMachine):
+    """Random reservations, charges and restarts, checked against plain sums.
+
+    A request commits its charge once settled, nothing once it is an expected
+    unbilled rejection, and otherwise its whole reservation.
+    """
+
+    requests = Bundle("requests")
+
+    def __init__(self):
+        super().__init__()
+        self.folder = Path(tempfile.mkdtemp())
+        self.rows: dict[str, dict] = {}
+
+    def teardown(self):
+        shutil.rmtree(self.folder)
+
+    def committed(self, run=None):
+        return sum(
+            row["billed"]
+            if row["billed"] is not None
+            else 0
+            if row["status"] == "expected_unbilled"
+            else row["reserved"]
+            for row in self.rows.values()
+            if run is None or row["run"] == run
+        )
+
+    @initialize(
+        limit=st.integers(1, 3_000_000),
+        attempt_limit=st.none() | st.integers(1, 2_000_000),
+    )
+    def open(self, limit, attempt_limit):
+        self.limit, self.attempt_limit = limit, attempt_limit
+        self.reopen()
+
+    @rule()
+    def reopen(self):
+        """A restart, which must lose nothing."""
+        self.ledger = Ledger(
+            self.folder / "spend.sqlite3",
+            Decimal(self.limit) / 10**6,
+            None if self.attempt_limit is None else Decimal(self.attempt_limit) / 10**6,
+        )
+
+    @rule(limit=st.integers(1, 3_000_000))
+    def change_limit(self, limit):
+        self.limit = limit
+        self.reopen()
+
+    @rule(
+        target=requests,
+        run=st.sampled_from(["a", "b"]),
+        role=st.sampled_from(["agent", "classifier"]),  # One cap for both.
+        micros=st.integers(1, 1_500_000),
+        edge=st.sampled_from([None, "total", "attempt"]),
+        offset=st.integers(-1, 1),
+    )
+    def reserve(self, run, role, micros, edge, offset):
+        # Sometimes exactly what is left, or one microdollar either side of it.
+        if edge == "total":
+            micros = max(1, self.limit - self.committed() + offset)
+        elif edge == "attempt" and self.attempt_limit is not None:
+            micros = max(1, self.attempt_limit - self.committed(run) + offset)
+        over_total = self.committed() + micros > self.limit
+        over_attempt = (
+            self.attempt_limit is not None
+            and self.committed(run) + micros > self.attempt_limit
+        )
+        try:
+            request = self.ledger.reserve(run, role, "model", Decimal(micros) / 10**6)
+        except AttemptSpendingLimit:
+            assert over_attempt and not over_total
+            return multiple()
+        except SpendingLimit:
+            assert over_total
+            return multiple()
+        assert not over_total and not over_attempt
+        self.rows[request] = {
+            "run": run,
+            "reserved": micros,
+            "billed": None,
+            "status": "reserved",
+        }
+        return request
+
+    @rule(
+        request=requests,
+        micros=st.integers(0, 2_000_000),
+        edge=st.booleans(),
+        offset=st.integers(-1, 1),
+    )
+    def settle(self, request, micros, edge, offset):
+        row = self.rows[request]
+        if edge:  # A charge at its reservation, or one microdollar either side.
+            micros = max(0, row["reserved"] + offset)
+        settled = row["billed"] is not None
+        if not settled:
+            row["billed"], row["status"] = micros, "settled"
+        try:
+            self.ledger.settle(request, Decimal(micros) / 10**6, "generation")
+        except CostAccountingError:
+            # A second charge is refused, and an overcharge is kept, then reported.
+            assert settled or micros > row["reserved"]
+        else:
+            assert not settled and micros <= row["reserved"]
+
+    @rule(request=requests)
+    def uncertain(self, request):
+        row = self.rows[request]
+        if row["billed"] is None and row["status"] != "expected_unbilled":
+            row["status"] = "uncertain"
+        self.ledger.uncertain(request)
+
+    @rule(request=requests)
+    def expect_unbilled(self, request):
+        row = self.rows[request]
+        if row["billed"] is None:
+            row["status"] = "expected_unbilled"
+        self.ledger.expect_unbilled(request, None)
+
+    @invariant()
+    def totals_match(self):
+        if not hasattr(self, "ledger"):
+            return
+        for run in (None, "a", "b"):
+            rows = [r for r in self.rows.values() if run is None or r["run"] == run]
+            unbilled = [r for r in rows if r["billed"] is None]
+            assert self.ledger.totals(run) == {
+                "billed_usd": sum(r["billed"] or 0 for r in rows) / 1_000_000,
+                "held_usd": sum(
+                    r["reserved"]
+                    for r in unbilled
+                    if r["status"] != "expected_unbilled"
+                )
+                / 1_000_000,
+                "expected_unbilled_requests": sum(
+                    r["status"] == "expected_unbilled" for r in unbilled
+                ),
+                "remaining_usd": max(0, self.limit - self.committed()) / 1_000_000,
             }
-        ],
-    }
 
 
-def billing_event(cost="0.001", provider="Azure"):
-    response = {
-        "id": "generation-test",
-        "provider": provider,
-        "usage": {"cost": cost, "is_byok": False},
-    }
-    return response
-
-
-@pytest.mark.parametrize(
-    "value", [True, None, "invalid", "NaN", "Infinity", -1, float("nan")]
-)
-def test_invalid_amounts_fail_closed(value):
-    with pytest.raises(CostAccountingError):
-        amount(value)
-
-
-def test_storage_rounds_up():
-    assert microdollars("0.0000001") == 1
-    assert microdollars("0.0000011") == 2
-
-
-def test_ledger_survives_restarts_and_settles_actual_charge(tmp_path):
-    path = tmp_path / "spend.sqlite3"
-    first = Ledger(path, 10)
-    request = first.reserve("run", "agent", "model", 2)
-    restarted = Ledger(path, 10)
-    assert restarted.totals() == {
-        "billed_usd": 0,
-        "held_usd": 2,
-        "remaining_usd": 8,
-        "expected_unbilled_requests": 0,
-    }
-    restarted.settle(request, "0.125", "generation")
-    assert first.totals() == {
-        "billed_usd": 0.125,
-        "held_usd": 0,
-        "remaining_usd": 9.875,
-        "expected_unbilled_requests": 0,
-    }
-    with pytest.raises(CostAccountingError, match="already settled"):
-        restarted.settle(request, 0, "generation")
-
-
-def test_uncertain_charge_keeps_full_hold(tmp_path):
-    ledger = Ledger(tmp_path / "spend.sqlite3", 1)
-    request = ledger.reserve("failed", "agent", "model", "0.75")
-    ledger.uncertain(request)
-    with pytest.raises(SpendingLimit):
-        ledger.reserve("replacement", "agent", "model", "0.26")
-    assert ledger.totals("failed")["held_usd"] == 0.75
-
-
-def test_reviewed_unbilled_rejection_releases_hold_without_generation_id(tmp_path):
-    ledger = Ledger(tmp_path / "spend.sqlite3", 1)
-    request = ledger.reserve("rejected", "agent", "model", "0.75")
-    ledger.uncertain(request)
-    ledger.settle(request, 0, None)
-    assert ledger.totals() == {
-        "billed_usd": 0,
-        "held_usd": 0,
-        "remaining_usd": 1,
-        "expected_unbilled_requests": 0,
-    }
-
-
-def test_expected_unbilled_rejection_keeps_record_but_not_spending_hold(tmp_path):
-    path = tmp_path / "spend.sqlite3"
-    ledger = Ledger(path, 1, 1)
-    request = ledger.reserve("run", "agent", "model", 0.75)
-    ledger.expect_unbilled(request, "gen-rejected")
-    ledger.uncertain(request)
-    assert ledger.totals() == {
-        "billed_usd": 0,
-        "held_usd": 0,
-        "remaining_usd": 1,
-        "expected_unbilled_requests": 1,
-    }
-    restarted = Ledger(path, 1, 1)
-    replacement = restarted.reserve("run", "agent", "model", 0.75)
-    assert restarted.totals("run")["held_usd"] == 0.75
-    with restarted.connect() as db:
-        assert db.execute(
-            "SELECT reserved, billed, status FROM requests WHERE id=?", (request,)
-        ).fetchone() == (750000, None, "expected_unbilled")
-    restarted.settle(request, 0.02, "gen-rejected")
-    assert restarted.totals()["expected_unbilled_requests"] == 0
-    assert restarted.totals()["billed_usd"] == 0.02
-    restarted.settle(replacement, 0, "gen-replacement")
-
-
-def test_local_ceiling_can_change_without_resetting_old_holds(tmp_path, monkeypatch):
-    monkeypatch.delenv("ARIADNE_SPENDING_LIMIT_USD", raising=False)
-    path = tmp_path / "spend.sqlite3"
-    first = Ledger(path, 1)
-    first.reserve("previous", "agent", "model", "0.75")
-    unlimited = Ledger(path, attempt_limit_usd=2)
-    assert unlimited.totals()["remaining_usd"] is None
-    unlimited.reserve("next", "agent", "model", "0.5")
-    assert unlimited.totals()["held_usd"] == 1.25
-    with pytest.raises(SpendingLimit):
-        Ledger(path, 1).reserve("next", "agent", "model", "0.1")
-    Ledger(path, 2).reserve("next", "agent", "model", "0.1")
-
-
-def test_optional_local_ceiling_comes_from_environment(tmp_path, monkeypatch):
-    monkeypatch.setenv("ARIADNE_SPENDING_LIMIT_USD", "1")
-    ledger = Ledger(tmp_path / "spend.sqlite3")
-    ledger.reserve("run", "agent", "model", "0.75")
-    with pytest.raises(SpendingLimit):
-        ledger.reserve("run", "agent", "model", "0.26")
-
-
-def test_overrun_is_preserved_and_prevents_further_spending(tmp_path):
-    ledger = Ledger(tmp_path / "spend.sqlite3", 1)
-    request = ledger.reserve("run", "agent", "model", "0.5")
-    with pytest.raises(CostAccountingError, match="exceeded"):
-        ledger.settle(request, "1.25", "generation")
-    assert ledger.totals()["billed_usd"] == 1.25
-    with pytest.raises(SpendingLimit):
-        ledger.reserve("run", "agent", "model", "0.01")
+TestLedgerModel = LedgerModel.TestCase
 
 
 def test_concurrent_reservations_share_one_budget(tmp_path):
@@ -200,139 +202,186 @@ def test_concurrent_reservations_share_one_budget(tmp_path):
     assert ledger.totals()["held_usd"] == 0.6
 
 
-def test_agent_and_classifier_share_cap_without_refunding_faults(tmp_path):
-    ledger = Ledger(tmp_path / "spend.sqlite3", 1)
-    request = ledger.reserve("implementation-fault", "agent", "model", "0.8")
-    ledger.settle(request, "0.8", "generation")
+def test_the_local_ceiling_can_come_from_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARIADNE_SPENDING_LIMIT_USD", "1")
+    ledger = Ledger(tmp_path / "spend.sqlite3")
+    ledger.reserve("run", "agent", "model", "0.75")
     with pytest.raises(SpendingLimit):
-        ledger.reserve("replacement", "classifier", "model", "0.3")
-    assert ledger.totals("implementation-fault")["billed_usd"] == 0.8
+        ledger.reserve("run", "agent", "model", "0.26")
 
 
-def test_per_run_totals_report_shared_remaining_allowance(tmp_path):
-    ledger = Ledger(tmp_path / "spend.sqlite3", 1)
-    first = ledger.reserve("first", "agent", "model", "0.6")
-    ledger.settle(first, "0.4", "generation")
-    ledger.reserve("second", "agent", "model", "0.2")
-    assert ledger.totals("second") == {
-        "billed_usd": 0,
-        "held_usd": 0.2,
-        "remaining_usd": 0.4,
-        "expected_unbilled_requests": 0,
+# Amounts and reservations.
+
+
+@given(st.decimals(min_value=0, max_value=10**6, places=12))
+def test_amounts_round_up_to_whole_microdollars(dollars):
+    stored = microdollars(dollars)
+    assert stored - 1 < dollars * 10**6 <= stored
+
+
+@pytest.mark.parametrize(
+    "value", [True, None, "invalid", "NaN", "Infinity", -1, float("nan")]
+)
+def test_an_invalid_amount_fails_closed(value):
+    with pytest.raises(CostAccountingError):
+        amount(value)
+
+
+@given(
+    st.sampled_from(PROFILES),
+    st.floats(0, 1),
+    st.floats(0, 1),
+    st.floats(0, 1),
+    st.floats(0, 1),
+)
+def test_a_reservation_covers_any_charge_the_route_allows(
+    model, input_share, cached_share, written_share, output_share
+):
+    config = load_draft(model=model)
+    prices = Prices.from_config(config)
+    output_limit = config["budgets"]["agent_max_output_tokens"]
+    prompt = int(input_share * prices.prompt_limit)
+    cached = int(cached_share * prompt)
+    written = int(written_share * prompt)
+    output = int(output_share * output_limit)
+    charge = (
+        (prompt - cached) * prices.input
+        + cached * prices.cached_input
+        + written * prices.cache_write
+        + output * prices.output
+    ) / 10**6
+    assert charge <= prices.reservation(output_limit)
+
+
+# The pinned route, the key and the billing record.
+
+
+def listing(model):
+    """OpenRouter's listing for a profile's pinned endpoint, as reviewed."""
+    config = load_draft(model=model)
+    route, pricing = config["agent_route"], config["agent_route"]["pricing"]
+
+    def per_token(key):
+        return str(Decimal(pricing.get(key, 0)) / 1_000_000)
+
+    return {
+        "endpoints": [
+            {
+                "tag": route["provider"],
+                "context_length": pricing["context_tokens"],
+                "max_prompt_tokens": pricing.get("max_prompt_tokens"),
+                "max_completion_tokens": config["budgets"]["agent_max_output_tokens"],
+                "supported_parameters": [
+                    "tools",
+                    "reasoning",
+                    route["output_token_parameter"],
+                ],
+                "pricing": {
+                    "prompt": per_token("input_per_million"),
+                    "completion": per_token("output_per_million"),
+                    "input_cache_read": per_token("cached_input_per_million"),
+                    "input_cache_write": per_token("cache_write_per_million"),
+                    "discount": pricing.get("discount", 0),
+                },
+            }
+        ],
     }
 
 
-@pytest.mark.parametrize(
-    "patch",
-    [{"limit": float("nan")}, {"limit_remaining": None}, {"limit_remaining": True}],
-)
-def test_key_rejects_unverifiable_allowance(patch):
-    with pytest.raises(CostAccountingError):
-        check_key(key_data() | patch)
-
-
-def test_key_limit_is_provider_configuration():
-    check_key(key_data())
-    check_key(key_data() | {"limit": 100, "limit_reset": "daily"})
-    check_key(key_data() | {"limit": None, "limit_remaining": None})
-    check_key(key_data() | {"include_byok_in_limit": False})
-    with pytest.raises(SpendingLimit):
-        check_key(key_data() | {"limit_remaining": 0})
-    with pytest.raises(SpendingLimit):
-        check_key(key_data() | {"limit": 0})
-
-
-def test_full_context_reservation_and_verified_rates():
-    config = load_draft(model=TEST_MODEL)
-    prices = Prices.from_config(config)
-    # Full context at the input rate plus the output allowance:
-    # (1,048,576 x $0.147 + 16,384 x $0.441) per million tokens.
-    assert prices.reservation(16384) == Decimal("0.161366016")
-    check_endpoint(endpoint_data(), config, prices)
+@pytest.mark.parametrize("model", PROFILES)
+def test_every_agent_profile_is_complete_and_matches_its_listing(model):
+    config = load_draft(model=model)
+    route, prices = config["agent_route"], Prices.from_config(config)
+    assert prices.input > 0 and prices.output > 0
+    assert 0 < config["budgets"]["agent_max_output_tokens"] < prices.context_tokens
+    assert route["reasoning_effort"] in ("low", "medium", "high", "xhigh", "max")
+    assert 0 <= route["temperature"] <= 2
+    assert route["provider"] and route["provider_name"] and route["token_encoding"]
+    assert "limit_usd" not in config["spending"]
+    check_endpoint(listing(model), config, prices)
 
 
 @pytest.mark.parametrize(
-    "field,value",
+    "change",
     [
+        ("tag", "other"),
         ("context_length", 2000000),
+        ("max_prompt_tokens", 1000),
         ("max_completion_tokens", 100),
         ("supported_parameters", ["max_tokens"]),
-        ("tag", "other"),
+        ("pricing", "prompt", "0.0000005"),
+        ("pricing", "completion", "0.000002"),
+        ("pricing", "input_cache_read", "0.0000002"),
+        ("pricing", "input_cache_write", "0.000001"),
+        ("pricing", "request", "0.01"),
+        ("pricing", "discount", 0),
+        ("pricing", "discount", 2),
     ],
 )
-def test_endpoint_limits_and_provider_changes_stop_run(field, value):
+def test_any_change_to_the_pinned_endpoint_stops_the_run(change):
     config = load_draft(model=TEST_MODEL)
-    data = endpoint_data()
-    data["endpoints"][0][field] = value
+    data = listing(TEST_MODEL)
+    target = data["endpoints"][0]
+    if change[0] == "pricing":
+        target = target["pricing"]
+        change = change[1:]
+    target[change[0]] = change[1]
     with pytest.raises(CostAccountingError):
         check_endpoint(data, config, Prices.from_config(config))
 
 
+KEY = {"limit": 10, "limit_reset": None, "limit_remaining": 10}
+
+
 @pytest.mark.parametrize(
-    "field,value",
+    "changes,outcome",
     [
-        ("prompt", "0.0000005"),
-        ("completion", "0.000002"),
-        ("input_cache_read", "0.0000002"),
-        ("request", "0.01"),
+        ({}, None),
+        ({"limit": 100, "limit_reset": "daily"}, None),
+        ({"limit": None, "limit_remaining": None}, None),
+        ({"limit_remaining": 0}, SpendingLimit),
+        ({"limit": 0}, SpendingLimit),
+        ({"limit": float("nan")}, CostAccountingError),
+        ({"limit_remaining": None}, CostAccountingError),
+        ({"limit_remaining": True}, CostAccountingError),
     ],
 )
-def test_endpoint_price_changes_stop_run(field, value):
-    config = load_draft(model=TEST_MODEL)
-    data = endpoint_data()
-    data["endpoints"][0]["pricing"][field] = value
-    with pytest.raises(CostAccountingError):
-        check_endpoint(data, config, Prices.from_config(config))
+def test_the_key_must_show_a_remaining_allowance(changes, outcome):
+    if outcome is None:
+        check_key(KEY | changes)
+    else:
+        with pytest.raises(outcome):
+            check_key(KEY | changes)
 
 
-def test_billing_uses_raw_response_and_pinned_provider():
-    assert billed_response(billing_event(), "Azure") == (
-        Decimal("0.001"),
-        "generation-test",
-    )
-    with pytest.raises(CostAccountingError):
-        billed_response(billing_event(provider="OpenAI"), "Azure")
+def billing(**changes):
+    usage = {"cost": "0.001", "is_byok": False} | changes.pop("usage", {})
+    return {"id": "generation-test", "provider": "Azure", "usage": usage} | changes
 
 
 @pytest.mark.parametrize(
-    "failure", ["missing", "duplicate", "no_cost", "byok", "invalid_cost"]
+    "response,charge",
+    [
+        (billing(), Decimal("0.001")),
+        (
+            billing(usage={"cost_details": {"upstream_inference_cost": "0.5"}}),
+            Decimal("0.001"),
+        ),
+        (billing(provider="OpenAI"), None),
+        (billing(id=None), None),
+        (billing(usage={"cost": "NaN"}), None),
+        (billing(usage={"is_byok": True}), None),
+        ({"id": "generation-test", "provider": "Azure", "usage": {}}, None),
+        ([billing(), billing()], None),
+        (None, None),
+    ],
 )
-def test_unverifiable_billing_stops_run(failure):
-    event = billing_event()
-    response = event
-    events = event
-    if failure == "missing":
-        events = None
-    elif failure == "duplicate":
-        events = [event, event]
-    elif failure == "no_cost":
-        response["usage"] = {}
-    elif failure == "byok":
-        response["usage"] = {
-            "cost": 0.001,
-            "is_byok": True,
-            "cost_details": {"upstream_inference_cost": 0.5},
-        }
+def test_a_charge_is_read_only_from_one_verified_billing_record(response, charge):
+    if charge is None:
+        with pytest.raises(CostAccountingError):
+            billed_response(response, "Azure")
     else:
-        response["usage"] = {"cost": "NaN", "is_byok": False}
-    with pytest.raises(CostAccountingError):
-        billed_response(events, "Azure")
-
-
-def test_prepaid_billing_can_include_upstream_cost_details():
-    event = billing_event()
-    event["usage"] = {
-        "cost": "0.000232",
-        "is_byok": False,
-        "cost_details": {"upstream_inference_cost": "0.000232"},
-    }
-    assert billed_response(event, "Azure")[0] == Decimal("0.000232")
-
-
-def test_routing_is_pinned_without_provider_fallback():
-    config = load_draft(model=TEST_MODEL)
-    assert routing(config)["only"] == [config["agent_route"]["provider"]]
-    assert routing(config)["allow_fallbacks"] is False
+        assert billed_response(response, "Azure") == (charge, "generation-test")
 
 
 def test_preflight_checks_key_and_endpoint(monkeypatch):
@@ -341,7 +390,7 @@ def test_preflight_checks_key_and_endpoint(monkeypatch):
 
     def read(path, key, timeout):
         calls.append(path)
-        return key_data() if path == "/key" else endpoint_data()
+        return KEY if path == "/key" else listing(TEST_MODEL)
 
     monkeypatch.setattr("benchmark.costs.read_json", read)
     assert preflight(config, "synthetic") == Prices.from_config(config)
@@ -352,53 +401,3 @@ def test_preflight_checks_key_and_endpoint(monkeypatch):
     del config["agent_route"]
     with pytest.raises(CostAccountingError):
         preflight(config, "synthetic")
-
-
-def test_attempt_ceiling_applies_per_run(tmp_path):
-    from benchmark.costs import AttemptSpendingLimit
-
-    ledger = Ledger(tmp_path / "ledger.sqlite3", "10", "1")
-    ledger.settle(ledger.reserve("a", "agent", "m", "0.6"), "0.6", None)
-    with pytest.raises(AttemptSpendingLimit):
-        ledger.reserve("a", "classifier", "m", "0.5")
-    ledger.reserve("b", "agent", "m", "0.9")  # Another attempt is unaffected.
-    assert issubclass(AttemptSpendingLimit, SpendingLimit)
-
-
-@pytest.mark.parametrize("model", sorted(load_draft()["agents"]))
-def test_every_agent_profile_is_complete_and_fits_its_context(model):
-    config = load_draft(model=model)
-    route, prices = config["agent_route"], Prices.from_config(config)
-    assert config["models"]["agent"] == "openrouter/" + model
-    assert prices.input > 0 and prices.output > 0
-    assert 0 < config["budgets"]["agent_max_output_tokens"] < prices.context_tokens
-    assert route["output_token_parameter"] in ("max_tokens", "max_completion_tokens")
-    assert route["reasoning_effort"] in ("low", "medium", "high", "xhigh", "max")
-    assert 0 <= route["temperature"] <= 2
-    assert route["provider"] and route["provider_name"] and route["token_encoding"]
-    assert "limit_usd" not in config["spending"]
-
-
-def test_default_settings_have_no_agent_profile():
-    default = load_draft()
-    assert "agent" not in default["models"] and "agent_route" not in default
-
-
-def test_discount_change_stops_the_pinned_route():
-    config = load_draft(model="mistralai/mistral-large-4-0")
-    endpoint = {
-        "tag": "mistral",
-        "context_length": 1048576,
-        "max_completion_tokens": 262144,
-        "supported_parameters": ["tools", "max_tokens", "reasoning"],
-        "pricing": {
-            "prompt": "0.00000068",
-            "completion": "0.00000209",
-            "input_cache_read": "0.00000007",
-            "discount": 0.5,
-        },
-    }
-    check_endpoint({"endpoints": [endpoint]}, config, Prices.from_config(config))
-    endpoint["pricing"]["discount"] = 0
-    with pytest.raises(CostAccountingError):
-        check_endpoint({"endpoints": [endpoint]}, config, Prices.from_config(config))

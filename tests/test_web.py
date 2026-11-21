@@ -491,7 +491,7 @@ class Web:
         return HTTPReply(200, self.text.encode())
 
 
-@settings(max_examples=500)
+@settings(max_examples=max(500, settings().max_examples))
 @given(st.lists(st.one_of(FETCH, SEARCH), min_size=1, max_size=5))
 def test_the_agent_receives_only_reviewed_text_or_a_fixed_message(calls):
     config = copy.deepcopy(CONFIG)
