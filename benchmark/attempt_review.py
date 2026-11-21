@@ -133,22 +133,28 @@ def clip(text: str, size: int) -> str:
 
 
 def transcript(trajectory: dict, limit: int) -> tuple[str, bool]:
-    """Agent messages, calls and outputs, trimmed to fit the token limit."""
+    """Agent messages, calls and outputs, trimmed to fit the token limit.
+
+    The flag says whether anything was cut, a clipped message or output included.
+    """
     steps = [step for step in trajectory.get("steps", []) if step["source"] != "system"]
     for size in (4000, 2000, 800, 300, 120):
-        lines = []
+        lines, clipped = [], False
         for step in steps:
             lines.append(f"[step {step['step_id']} {step['source']}]")
-            if step.get("message"):
-                lines.append(clip(str(step["message"]), size))
+            parts = [str(step["message"])] if step.get("message") else []
             for call in step.get("tool_calls") or []:
                 arguments = json.dumps(call.get("arguments"), ensure_ascii=False)
-                lines.append(f"call {call['function_name']}: {clip(arguments, size)}")
+                parts.append((f"call {call['function_name']}: ", arguments))
             for result in (step.get("observation") or {}).get("results", []):
-                lines.append(f"output: {clip(str(result.get('content')), size)}")
+                parts.append(("output: ", str(result.get("content"))))
+            for part in parts:
+                label, body = part if isinstance(part, tuple) else ("", part)
+                clipped |= len(body) > size
+                lines.append(label + clip(body, size))
         text = "\n".join(lines)
         if tokens(text) <= limit:
-            return text, size != 4000
+            return text, clipped
     # Still too long: keep the start and the end of the attempt.
     while tokens(text) > limit and len(lines) > 2:
         del lines[len(lines) // 2]
