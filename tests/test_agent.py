@@ -311,14 +311,18 @@ def test_first_submit_ends_trial_even_when_malformed(tmp_path, live_mock, argume
 def test_tool_budget_counts_unknown_and_malformed_proposals(tmp_path, live_mock):
     config, replies, seen = live_mock
     config["budgets"]["total_tool_calls"] = 1
-    replies.extend(
-        [completion([api_call("unknown", {})]), completion([api_call("bash", {})])]
-    )
+    # The over-limit call's arguments are broken JSON, which is never parsed.
+    raw = api_call("bash", {})
+    raw["function"]["arguments"] = '{"command":"one","command":"two"}'
+    replies.extend([completion([api_call("unknown", {})]), completion([raw])])
     context, trajectory = run_agent(environment_stub(tmp_path), config)
     assert len(seen) == 2
     assert context.metadata["non_submit_proposals"] == 2
     assert context.metadata["stop_reason"] == "total_tool_calls"
     assert trajectory.steps[-1].observation is None
+    proposed = trajectory.steps[-1].tool_calls
+    assert proposed is not None and proposed[0].extra is not None
+    assert proposed[0].extra["parse_error"] is None
 
 
 def test_turn_limit_and_tool_schemas(tmp_path, live_mock):
@@ -492,20 +496,6 @@ def test_invalid_argument_json_is_preserved_for_audit():
     assert calls[0]["parse_error"] is not None
     assert session.counters.non_submit == 1
     assert session.audit.items[1]["arguments"] == raw["function"]["arguments"]
-
-
-def test_over_budget_arguments_are_counted_without_json_parsing(tmp_path, live_mock):
-    config, replies, seen = live_mock
-    config["budgets"]["total_tool_calls"] = 0
-    raw = api_call("bash", {})
-    raw["function"]["arguments"] = '{"command":"one","command":"two"}'
-    replies.append(completion([raw]))
-    context, trajectory = run_agent(environment_stub(tmp_path), config)
-    assert context.metadata["non_submit_proposals"] == 1
-    assert context.metadata["stop_reason"] == "total_tool_calls"
-    proposed = trajectory.steps[-1].tool_calls
-    assert proposed is not None and proposed[0].extra is not None
-    assert proposed[0].extra["parse_error"] is None
 
 
 def test_ariadne_agent_rejects_alternate_host_environment(tmp_path):
