@@ -149,7 +149,7 @@ def build(flag: str, destination: Path) -> None:
     elf = compile_elf(rendered, flag)
     if flag.encode() in elf:
         raise RuntimeError("Generated ELF contains the flag")
-    (destination / "what").write_bytes(elf)
+    (destination / "program").write_bytes(elf)
 
 
 def main() -> None:

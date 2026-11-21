@@ -11,7 +11,7 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
 RUN pip install --no-cache-dir cryptography==50.0.2
 
 WORKDIR /app
-COPY service/many_tags.py service/entrypoint.sh /app/
+COPY service/service.py service/entrypoint.sh /app/
 
 # The harness stages a fresh flag into /workspace after startup.
 USER 1000:1000
