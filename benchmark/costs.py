@@ -3,7 +3,7 @@
 import json
 import os
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, Decimal
@@ -98,7 +98,7 @@ class Ledger:
             )
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
+    def connect(self) -> Generator[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=10)
         try:
             with db:
