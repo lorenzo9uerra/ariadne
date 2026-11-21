@@ -100,14 +100,14 @@ The reference runs from A1 then take the real harness end to end, one run per
 task, and `benchmark check` confirms each run's evidence and cleanup.
 
 Many of the tests are property tests, which try many generated inputs. They
-use the same inputs on every run, so a failure can be reproduced. Every now
-and then they also run with new inputs, which can reach cases the regular
-runs never try, and a case found that way is added to the regular tests.
+use the same inputs on every run, so a failure can be reproduced. A pull
+request that changes a property test, or the code it covers, also runs that
+test with new inputs (`HYPOTHESIS_PROFILE=explore`), which can reach cases the
+regular runs never try. A weekly CI job does the same for the whole suite.
+Any case found that way is added to the regular tests.
 
 - [ ] The full suite passes, Docker tests included:
       `RUN_DOCKER=1 uv run pytest`.
-- [ ] It passes again with new inputs:
-      `HYPOTHESIS_PROFILE=explore uv run pytest`.
 - [ ] Every task's reference run passes `uv run python -m benchmark check`.
 
 ### A3. A real model, on development tasks only
