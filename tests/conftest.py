@@ -7,6 +7,7 @@ import os
 
 import httpx
 import pytest
+from hypothesis import settings
 
 from benchmark.budgets import load_draft
 from benchmark.costs import Prices
@@ -18,6 +19,13 @@ PLATFORM = os.environ.get("SANDBOX_PLATFORM", "linux/arm64")
 # Docker tests start sandboxes directly, without a Harbor job, so they need the
 # same content-hash image tag (sandbox/compose.yaml requires it).
 os.environ.setdefault("SANDBOX_IMAGE_TAG", image_tag(PLATFORM))
+
+# Property tests draw the same examples on every run, so a failure in CI is
+# reproducible, and they keep no example database in the checkout. Set
+# HYPOTHESIS_PROFILE=explore to draw new examples locally.
+settings.register_profile("default", derandomize=True, database=None, deadline=None)
+settings.register_profile("explore", max_examples=2000, database=None, deadline=None)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
 
 
 def pytest_sessionstart(session):
