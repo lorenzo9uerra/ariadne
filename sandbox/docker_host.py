@@ -9,7 +9,7 @@ import hashlib
 import os
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -148,7 +148,7 @@ def ssh_command(endpoint: str) -> list[str]:
 
 
 @contextlib.contextmanager
-def host_canary() -> Iterator[str]:
+def host_canary() -> Generator[str]:
     """Yield a path that exists on the Docker host and must be invisible to containers.
 
     For a remote context the canary is created on the VM, which is the host
