@@ -94,11 +94,12 @@ class LedgerModel(RuleBasedStateMachine):
     @rule(
         target=requests,
         run=st.sampled_from(["a", "b"]),
+        role=st.sampled_from(["agent", "classifier"]),  # One cap for both.
         micros=st.integers(1, 1_500_000),
         edge=st.sampled_from([None, "total", "attempt"]),
         offset=st.integers(-1, 1),
     )
-    def reserve(self, run, micros, edge, offset):
+    def reserve(self, run, role, micros, edge, offset):
         # Sometimes exactly what is left, or one microdollar either side of it.
         if edge == "total":
             micros = max(1, self.limit - self.committed() + offset)
@@ -110,9 +111,7 @@ class LedgerModel(RuleBasedStateMachine):
             and self.committed(run) + micros > self.attempt_limit
         )
         try:
-            request = self.ledger.reserve(
-                run, "agent", "model", Decimal(micros) / 10**6
-            )
+            request = self.ledger.reserve(run, role, "model", Decimal(micros) / 10**6)
         except AttemptSpendingLimit:
             assert over_attempt and not over_total
             return multiple()

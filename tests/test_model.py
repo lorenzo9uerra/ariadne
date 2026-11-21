@@ -5,17 +5,19 @@ import copy
 import json
 import tempfile
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from email.utils import format_datetime
 from pathlib import Path
 
 import httpx
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from benchmark.audit import AuditTrail
 from benchmark.budgets import AttemptClock, load_draft
 from benchmark.costs import (
+    AttemptSpendingLimit,
     CostAccountingError,
     Ledger,
     Prices,
@@ -410,72 +412,97 @@ REPLIES = [
     "ok",
     "unbilled",
     "bad usage",
+    "cached over input",
     "no choice",
     "transient",
     "rate limited",
     "pool rejection",
+    "pool rejection with id",
     "rejected",
     "timeout",
 ]
+# Replies whose billing is verified, so their charge settles, and the outcome.
+SETTLED: dict[str, type] = {
+    "ok": dict,
+    "bad usage": CostAccountingError,
+    "cached over input": CostAccountingError,
+    "no choice": ModelAPIError,
+}
 
 
-def provider_reply(kind):
+def provider_reply(kind, number):
     if kind == "timeout":
         raise httpx.ReadTimeout("Synthetic timeout")
     if kind in ("transient", "rate limited", "rejected"):
         return httpx.Response({"transient": 503, "rate limited": 429}.get(kind, 400))
-    if kind == "pool rejection":
+    if kind.startswith("pool rejection"):
         error = {
             "code": 429,
             "metadata": {"limit_source": "upstream_provider_shared_pool"},
         }
-        return httpx.Response(429, json={"error": error})
+        body = {"error": error}
+        if kind.endswith("with id"):  # Its billing lookup then finds nothing.
+            body["id"] = f"gen-rejected-{number}"
+        return httpx.Response(429, json=body)
     data = completion()
     if kind == "unbilled":
         del data["usage"]["cost"]
     elif kind == "bad usage":
         data["usage"]["prompt_tokens"] = True
+    elif kind == "cached over input":
+        data["usage"]["prompt_tokens_details"] = {"cached_tokens": 101}
     elif kind == "no choice":
         data["choices"] = []
     return httpx.Response(200, json=data)
 
 
-@settings(max_examples=150)
+def test_the_reservation_is_the_full_context_and_output_at_the_highest_rates():
+    prices = Prices.from_config(load_draft(model=TEST_MODEL))
+    # (1,048,576 x $0.147 + 16,384 x $0.441) per million tokens.
+    assert prices.reservation(16384) == Decimal("0.161366016")
+
+
+@settings(max_examples=max(150, settings().max_examples))
 @given(
     st.lists(st.sampled_from(REPLIES), min_size=1, max_size=6),
     st.integers(0, 3),
     st.integers(1, 5),
+    # The attempt ceiling: exactly some number of holds, one microdollar
+    # either side of it, or half a hold above it.
+    st.sampled_from([-1, 0, 1, "half"]),
 )
 def test_every_request_is_funded_first_and_only_a_verified_charge_releases_it(
-    replies, retries, holds
+    replies, retries, holds, edge
 ):
     config = load_draft(model=TEST_MODEL)
     config["budgets"]["model_retries"] = retries
     for key in config["requests"]:
         if "retry" in key:
             config["requests"][key] = 0
-    prices = Prices.from_config(config)
-    reservation = prices.reservation(config["budgets"]["agent_max_output_tokens"])
+    output = config["budgets"]["agent_max_output_tokens"]
+    hold = microdollars(Prices.from_config(config).reservation(output))
+    limit = holds * hold + (hold // 2 if edge == "half" else edge)
+    audit = AuditTrail("run", "sample")
     with tempfile.TemporaryDirectory() as folder:
-        ledger = Ledger(
-            Path(folder) / "spend.sqlite3", 10, holds * reservation + reservation / 2
-        )
+        ledger = Ledger(Path(folder) / "spend.sqlite3", 10, Decimal(limit) / 10**6)
         sent = []
 
         def handler(request):
+            if request.method == "GET":
+                return httpx.Response(404)  # No billing record for a rejection.
             with ledger.connect() as db:
                 (rows,) = db.execute("SELECT COUNT(*) FROM requests").fetchone()
             assert rows == len(sent) + 1  # This request is already reserved.
             kind = replies[len(sent)] if len(sent) < len(replies) else "ok"
             sent.append(kind)
-            return provider_reply(kind)
+            return provider_reply(kind, len(sent))
 
         model = OpenRouterModel(
             config,
             "synthetic-key",
             ledger,
             "run",
-            AuditTrail("run", "sample"),
+            audit,
             transport=httpx.MockTransport(handler),
         )
         model.ready = True
@@ -490,25 +517,19 @@ def test_every_request_is_funded_first_and_only_a_verified_charge_releases_it(
         totals = ledger.totals()
 
     # What the protocol says, in microdollars.
-    hold, limit = (
-        microdollars(reservation),
-        microdollars(holds * reservation + reservation / 2),
-    )
     held = billed = unbilled = 0
     expected_sent, expected = [], ModelAPIError  # Retries exhausted, unless below.
     for attempt in range(retries + 1):
         if held + billed + hold > limit:
-            expected = SpendingLimit
+            expected = AttemptSpendingLimit
             break
         kind = replies[attempt] if attempt < len(replies) else "ok"
         expected_sent.append(kind)
-        if kind in ("ok", "bad usage", "no choice"):
+        if kind in SETTLED:
             billed += 1000  # Billing was verified, so the charge settles.
-            expected = {"ok": dict, "bad usage": CostAccountingError}.get(
-                kind, ModelAPIError
-            )
+            expected = SETTLED[kind]
             break
-        if kind == "pool rejection":
+        if kind.startswith("pool rejection"):
             unbilled += 1  # Rejected before inference: recorded, not held, retried.
             continue
         held += hold  # It may have been charged, so the hold stays.
@@ -520,6 +541,11 @@ def test_every_request_is_funded_first_and_only_a_verified_charge_releases_it(
     assert totals["held_usd"] == held / 1_000_000
     assert totals["billed_usd"] == billed / 1_000_000
     assert totals["expected_unbilled_requests"] == unbilled
+    # A rejection whose billing lookup failed is still recorded as expected free.
+    requests = [item for item in audit.items if item["stage"] == "model_request"]
+    for kind, item in zip(sent, requests):
+        if kind.startswith("pool rejection"):
+            assert item["billing_status"] == "expected_zero_unconfirmed"
 
 
 def test_a_retry_wait_that_does_not_fit_the_attempt_ends_it(model_factory):
@@ -578,6 +604,8 @@ TOKEN = st.text(
     SEPARATORS,
     SEPARATORS,
 )
+# A credential that looks like a kept identifier (from a review).
+@example("k" * 12, "sk-", "synthetic-error", "message", "", "")
 def test_error_diagnostics_never_contain_a_credential(
     key, prefix, other, place, before, after
 ):
@@ -598,8 +626,13 @@ def test_error_diagnostics_never_contain_a_credential(
         429, headers=headers, json={"id": "gen-synthetic-error", "error": error}
     )
     details = error_details(response, api_key)
-    encoded = json.dumps(details, ensure_ascii=False)
-    assert (other if prefix else key) not in encoded and "private" not in encoded
+    carried = (
+        details["provider_request_id"]
+        if place == "request id"
+        else details["api_error"][place]
+    )
+    assert (other if prefix else key) not in carried
+    assert "private" not in json.dumps(details)
     # What diagnosis needs is kept.
     assert details["generation_id"] == "gen-synthetic-error"
     assert details["retry_after_seconds"] == 12 and "provider_request_id" in details
