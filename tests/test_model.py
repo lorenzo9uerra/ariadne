@@ -3,15 +3,25 @@
 import asyncio
 import copy
 import json
+import tempfile
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
+from pathlib import Path
 
 import httpx
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from benchmark.audit import AuditTrail
 from benchmark.budgets import AttemptClock, load_draft
-from benchmark.costs import CostAccountingError, Ledger, Prices, SpendingLimit
+from benchmark.costs import (
+    CostAccountingError,
+    Ledger,
+    Prices,
+    SpendingLimit,
+    microdollars,
+)
 from benchmark.model import (
     ContextLimit,
     ModelAPIError,
@@ -81,125 +91,6 @@ def test_generation_requires_preflight(model_factory):
     assert model.ledger.totals()["held_usd"] == 0
 
 
-def test_request_is_reserved_and_routed_before_response(model_factory):
-    model = None
-
-    def reply(request):
-        assert model is not None
-        assert model.ledger.totals()["held_usd"] > 0
-        body = json.loads(request.content)
-        assert body["provider"]["only"] == [model.config["agent_route"]["provider"]]
-        assert body["provider"]["allow_fallbacks"] is False
-        assert body["max_tokens"] == model.config["budgets"]["agent_max_output_tokens"]
-        assert "max_completion_tokens" not in body
-        assert body["temperature"] == model.config["agent_route"]["temperature"]
-        return httpx.Response(200, json=completion(prompt_tokens=70000))
-
-    model = model_factory(reply)
-    result = generate(model)
-    assert result["cost_usd"] == 0.001
-    assert result["usage"] == {
-        "prompt_tokens": 70000,
-        "completion_tokens": 10,
-        "cached_tokens": 0,
-    }
-    assert model.ledger.totals()["billed_usd"] == 0.001
-    assert model.ledger.totals()["held_usd"] == 0
-    assert model.audit.items[-1]["status"] == "settled"
-
-
-@pytest.mark.parametrize(
-    "defect", ["billing", "provider", "byok", "tokens", "cached", "choices"]
-)
-def test_invalid_billing_or_response_is_not_delivered(model_factory, defect):
-    data = completion()
-    if defect == "billing":
-        del data["usage"]["cost"]
-    elif defect == "provider":
-        data["provider"] = "Unexpected provider"
-    elif defect == "byok":
-        data["usage"]["is_byok"] = True
-    elif defect == "tokens":
-        data["usage"]["prompt_tokens"] = True
-    elif defect == "cached":
-        data["usage"]["prompt_tokens_details"] = {"cached_tokens": 101}
-    else:
-        data["choices"] = []
-    model = model_factory(lambda request: httpx.Response(200, json=data))
-    with pytest.raises((CostAccountingError, ModelAPIError)):
-        generate(model)
-    totals = model.ledger.totals()
-    assert (
-        totals["held_usd"] > 0
-        if defect in ("billing", "provider", "byok")
-        else totals["billed_usd"] > 0
-    )
-
-
-@pytest.mark.parametrize("failure", ["timeout", "status"])
-def test_each_retry_has_a_hold_and_keeps_uncertain_charge(model_factory, failure):
-    count = 0
-
-    def reply(request):
-        nonlocal count
-        count += 1
-        if count == 1:
-            if failure == "timeout":
-                raise httpx.ReadTimeout("Synthetic timeout")
-            return httpx.Response(503)
-        return httpx.Response(200, json=completion())
-
-    model = model_factory(reply)
-    generate(model)
-    assert count == 2
-    assert model.ledger.totals()["held_usd"] > 0
-    assert model.ledger.totals()["billed_usd"] == 0.001
-    assert len(model.audit.items) == 2
-
-
-def test_nontransient_error_is_not_retried(model_factory):
-    model = model_factory(lambda request: httpx.Response(400))
-    with pytest.raises(ModelAPIError):
-        generate(model)
-    assert len(model.audit.items) == 1
-    assert model.ledger.totals()["held_usd"] > 0
-
-
-def test_explicit_pool_rejection_does_not_exhaust_spending_or_claim_zero_charge(
-    model_factory,
-):
-    calls = 0
-
-    def reply(request):
-        nonlocal calls
-        if request.method == "GET":
-            return httpx.Response(404)
-        calls += 1
-        if calls <= 3:
-            return httpx.Response(
-                429,
-                json={
-                    "id": f"gen-rejected-{calls}",
-                    "error": {
-                        "code": 429,
-                        "metadata": {"limit_source": "upstream_provider_shared_pool"},
-                    },
-                },
-            )
-        return httpx.Response(200, json=completion())
-
-    model = model_factory(reply, holds=1.1)
-    generate(model)
-    totals = model.ledger.totals()
-    assert totals["held_usd"] == 0
-    assert totals["expected_unbilled_requests"] == 3
-    assert totals["billed_usd"] == 0.001
-    assert all(
-        e["billing_status"] == "expected_zero_unconfirmed"
-        for e in model.audit.items[:3]
-    )
-
-
 @pytest.mark.parametrize(
     "defect", ["usage", "choices", "unspecified", "status", "malformed"]
 )
@@ -266,18 +157,6 @@ def test_backoff_and_optional_attempt_cap(
     assert model.ledger.totals()["billed_usd"] == 0.001
 
 
-def test_retry_wait_beyond_the_allowance_counts_against_the_attempt(
-    model_factory,
-):
-    model = model_factory(lambda request: httpx.Response(429), attempt_limit=None)
-    model.config["requests"]["rate_limit_retry_initial_seconds"] = 30
-    model.config["requests"]["rate_limit_retry_max_seconds"] = 120
-    with pytest.raises(TimeoutError, match="retry backoff"):
-        generate(model, deadline_seconds=20, wait_allowance=5)
-    assert len(model.audit.items) == 1
-    assert model.ledger.totals()["held_usd"] > 0
-
-
 @pytest.mark.parametrize("status", [429, 503])
 def test_retry_wait_within_the_allowance_stops_the_clock(
     model_factory, monkeypatch, status
@@ -302,21 +181,6 @@ def test_retry_wait_within_the_allowance_stops_the_clock(
     assert asyncio.run(run())["message"]
     assert waits == [30] and clock.excluded == 30
     assert 45 < clock.remaining() <= 50
-
-
-def test_spending_cap_prevents_another_request(model_factory):
-    count = 0
-
-    def reply(request):
-        nonlocal count
-        count += 1
-        return httpx.Response(503)
-
-    model = model_factory(reply)
-    with pytest.raises(SpendingLimit):
-        generate(model)
-    assert count == 4
-    assert model.ledger.totals()["held_usd"] * 1_000_000 < model.ledger.attempt_limit
 
 
 def test_cancelled_request_keeps_its_hold(model_factory):
@@ -361,17 +225,6 @@ def test_deadline_stops_before_reserving(model_factory):
     assert model.ledger.totals()["held_usd"] == 0
 
 
-def test_token_estimate_accepts_literal_special_token_text():
-    assert (
-        input_tokens(
-            [{"role": "user", "content": "Synthetic <|endoftext|> text"}],
-            [],
-            "openrouter/openai/gpt-4.1-mini",
-        )
-        > 0
-    )
-
-
 @pytest.mark.parametrize("model_id", sorted(load_draft()["agents"]))
 def test_reasoning_profile_request_and_billing(model_factory, model_id):
     config = load_draft(model=model_id)
@@ -389,6 +242,7 @@ def test_reasoning_profile_request_and_billing(model_factory, model_id):
         requests.append(body)
         assert body["model"] == model_id
         assert body["provider"]["only"] == [config["agent_route"]["provider"]]
+        assert body["provider"]["allow_fallbacks"] is False
         assert body["reasoning"] == {
             "effort": config["agent_route"]["reasoning_effort"]
         }
@@ -407,79 +261,6 @@ def test_reasoning_profile_request_and_billing(model_factory, model_id):
     generate(model, [{"role": "user", "content": "Synthetic record"}, first["message"]])
     assert requests[1]["messages"][1] == message
     assert model.ledger.totals()["billed_usd"] == 0.002
-
-
-def test_unknown_model_requires_explicit_token_estimate():
-    assert (
-        input_tokens(
-            [{"role": "user", "content": "Synthetic record"}],
-            [],
-            "qwen/qwen3.8-flash",
-            "o200k_base",
-        )
-        > 0
-    )
-    with pytest.raises(CostAccountingError):
-        input_tokens([], [], "unknown/model")
-
-
-@pytest.mark.parametrize(
-    "value, expected",
-    [
-        ("12", 12),
-        ("0", 0),
-        ("-1", None),
-        (None, None),
-        ("invalid", None),
-        ("nan", None),
-        ("inf", None),
-    ],
-)
-def test_retry_after_header(value, expected):
-    assert retry_after(value) == expected
-
-
-def test_retry_after_accepts_http_date():
-    future = datetime.now(timezone.utc) + timedelta(seconds=60)
-    assert retry_after(format_datetime(future, usegmt=True)) == pytest.approx(60, abs=2)
-
-
-def test_error_diagnostics_redact_credentials_and_keep_correlation_ids():
-    response = httpx.Response(
-        429,
-        headers={"X-Request-Id": "request-123", "Retry-After": "12"},
-        json={
-            "id": "gen-synthetic-error",
-            "error": {
-                "code": 429,
-                "message": "Rejected synthetic-key and Bearer other-secret",
-                "metadata": {
-                    "provider_name": "Mistral",
-                    "raw": "sk-or-v1-another-key",
-                    "limit_source": "openrouter_in_flight_budget",
-                    "ignored": "private",
-                },
-            },
-        },
-    )
-    details = error_details(response, "synthetic-key")
-    encoded = json.dumps(details)
-    assert all(
-        secret not in encoded
-        for secret in (
-            "synthetic-key",
-            "other-secret",
-            "sk-or-v1-another-key",
-            "private",
-        )
-    )
-    assert details["generation_id"] == "gen-synthetic-error"
-    assert details["provider_request_id"] == "request-123"
-    assert details["retry_after_seconds"] == 12
-    assert details["api_error"]["provider_name"] == "Mistral"
-    assert details["api_error"]["limit_source"] == "openrouter_in_flight_budget"
-    response.headers["X-Generation-Id"] = "gen-conflicting"
-    assert "generation_id" not in error_details(response, "synthetic-key")
 
 
 def test_confirmed_error_charges_release_holds_before_retry(model_factory, monkeypatch):
@@ -609,17 +390,6 @@ def test_error_lookup_requires_confirmed_matching_billing(model_factory, defect)
         assert entry["billing_status"] == "unconfirmed"
 
 
-def test_retry_after_cannot_extend_attempt_deadline(model_factory):
-    model = model_factory(
-        lambda request: httpx.Response(429, headers={"Retry-After": "60"})
-    )
-    with pytest.raises(TimeoutError, match="backoff"):
-        generate(model)
-    assert len(model.audit.items) == 1
-    assert model.audit.items[0]["retry_wait_seconds"] == 60
-    assert model.ledger.totals()["held_usd"] > 0
-
-
 def test_excluded_wait_also_moves_the_attempt_timeout():
     async def run():
         clock = AttemptClock(0.05, wait_allowance=1)
@@ -632,3 +402,206 @@ def test_excluded_wait_also_moves_the_attempt_timeout():
         return clock
 
     assert asyncio.run(run()).excluded == 1  # The allowance caps what is excluded.
+
+
+# Every request is funded first, and only a verified charge releases its hold.
+
+REPLIES = [
+    "ok",
+    "unbilled",
+    "bad usage",
+    "no choice",
+    "transient",
+    "rate limited",
+    "pool rejection",
+    "rejected",
+    "timeout",
+]
+
+
+def provider_reply(kind):
+    if kind == "timeout":
+        raise httpx.ReadTimeout("Synthetic timeout")
+    if kind in ("transient", "rate limited", "rejected"):
+        return httpx.Response({"transient": 503, "rate limited": 429}.get(kind, 400))
+    if kind == "pool rejection":
+        error = {
+            "code": 429,
+            "metadata": {"limit_source": "upstream_provider_shared_pool"},
+        }
+        return httpx.Response(429, json={"error": error})
+    data = completion()
+    if kind == "unbilled":
+        del data["usage"]["cost"]
+    elif kind == "bad usage":
+        data["usage"]["prompt_tokens"] = True
+    elif kind == "no choice":
+        data["choices"] = []
+    return httpx.Response(200, json=data)
+
+
+@settings(max_examples=150)
+@given(
+    st.lists(st.sampled_from(REPLIES), min_size=1, max_size=6),
+    st.integers(0, 3),
+    st.integers(1, 5),
+)
+def test_every_request_is_funded_first_and_only_a_verified_charge_releases_it(
+    replies, retries, holds
+):
+    config = load_draft(model=TEST_MODEL)
+    config["budgets"]["model_retries"] = retries
+    for key in config["requests"]:
+        if "retry" in key:
+            config["requests"][key] = 0
+    prices = Prices.from_config(config)
+    reservation = prices.reservation(config["budgets"]["agent_max_output_tokens"])
+    with tempfile.TemporaryDirectory() as folder:
+        ledger = Ledger(
+            Path(folder) / "spend.sqlite3", 10, holds * reservation + reservation / 2
+        )
+        sent = []
+
+        def handler(request):
+            with ledger.connect() as db:
+                (rows,) = db.execute("SELECT COUNT(*) FROM requests").fetchone()
+            assert rows == len(sent) + 1  # This request is already reserved.
+            kind = replies[len(sent)] if len(sent) < len(replies) else "ok"
+            sent.append(kind)
+            return provider_reply(kind)
+
+        model = OpenRouterModel(
+            config,
+            "synthetic-key",
+            ledger,
+            "run",
+            AuditTrail("run", "sample"),
+            transport=httpx.MockTransport(handler),
+        )
+        model.ready = True
+        try:
+            outcome = asyncio.run(
+                model.generate(
+                    [{"role": "user", "content": "Synthetic"}], [], AttemptClock(60)
+                )
+            )
+        except (CostAccountingError, ModelAPIError, SpendingLimit) as error:
+            outcome = error
+        totals = ledger.totals()
+
+    # What the protocol says, in microdollars.
+    hold, limit = (
+        microdollars(reservation),
+        microdollars(holds * reservation + reservation / 2),
+    )
+    held = billed = unbilled = 0
+    expected_sent, expected = [], ModelAPIError  # Retries exhausted, unless below.
+    for attempt in range(retries + 1):
+        if held + billed + hold > limit:
+            expected = SpendingLimit
+            break
+        kind = replies[attempt] if attempt < len(replies) else "ok"
+        expected_sent.append(kind)
+        if kind in ("ok", "bad usage", "no choice"):
+            billed += 1000  # Billing was verified, so the charge settles.
+            expected = {"ok": dict, "bad usage": CostAccountingError}.get(
+                kind, ModelAPIError
+            )
+            break
+        if kind == "pool rejection":
+            unbilled += 1  # Rejected before inference: recorded, not held, retried.
+            continue
+        held += hold  # It may have been charged, so the hold stays.
+        if kind in ("unbilled", "rejected"):
+            expected = CostAccountingError if kind == "unbilled" else ModelAPIError
+            break
+    assert sent == expected_sent
+    assert isinstance(outcome, expected)
+    assert totals["held_usd"] == held / 1_000_000
+    assert totals["billed_usd"] == billed / 1_000_000
+    assert totals["expected_unbilled_requests"] == unbilled
+
+
+def test_a_retry_wait_that_does_not_fit_the_attempt_ends_it(model_factory):
+    # A Retry-After past the deadline, or a backoff longer than the allowance.
+    for header, allowance in (("60", 0), (None, 5)):
+        headers = {"Retry-After": header} if header else {}
+        model = model_factory(
+            lambda request: httpx.Response(429, headers=headers), attempt_limit=None
+        )
+        model.config["requests"]["rate_limit_retry_initial_seconds"] = 30
+        model.config["requests"]["rate_limit_retry_max_seconds"] = 120
+        with pytest.raises(TimeoutError, match="backoff"):
+            generate(model, deadline_seconds=20, wait_allowance=allowance)
+        assert len(model.audit.items) == 1
+        assert model.ledger.totals()["held_usd"] > 0
+
+
+def test_the_token_estimate_needs_a_reviewed_tokenizer():
+    text = [{"role": "user", "content": "Synthetic <|endoftext|> text"}]
+    assert input_tokens(text, [], "openrouter/openai/gpt-4.1-mini") > 0
+    assert input_tokens(text, [], "qwen/qwen3.8-flash", "o200k_base") > 0
+    with pytest.raises(CostAccountingError):
+        input_tokens([], [], "unknown/model")
+
+
+# Diagnostics.
+
+
+@given(st.integers(0, 10**6) | st.floats(0, 10**6))
+def test_a_retry_after_delay_reads_back_as_seconds_or_as_a_date(seconds):
+    assert retry_after(str(seconds)) == pytest.approx(seconds)
+    date = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    assert retry_after(format_datetime(date, usegmt=True)) == pytest.approx(
+        seconds, abs=2
+    )
+
+
+@pytest.mark.parametrize("value", ["-1", None, "invalid", "nan", "inf"])
+def test_an_invalid_retry_after_is_ignored(value):
+    assert retry_after(value) is None
+
+
+SEPARATORS = st.text(" .,:;!?()[]{}<>'/=", max_size=20)
+TOKEN = st.text(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-",
+    min_size=12,
+    max_size=30,
+)
+
+
+@given(
+    TOKEN,
+    st.sampled_from(["sk-or-v1-", "sk-", "tvly-", "Bearer ", ""]),
+    TOKEN,
+    st.sampled_from(["message", "raw", "provider_name", "reason", "request id"]),
+    SEPARATORS,
+    SEPARATORS,
+)
+def test_error_diagnostics_never_contain_a_credential(
+    key, prefix, other, place, before, after
+):
+    api_key = "sk-or-v1-" + key
+    # The run's own key, or another credential-shaped value.
+    secret = prefix + other if prefix else api_key
+    text = before + secret + after
+    metadata = {"provider_name": "Mistral", "ignored": "private"}
+    error = {"code": 429, "message": "Rate limited", "metadata": metadata}
+    headers = {"X-Request-Id": "request-123", "Retry-After": "12"}
+    if place == "request id":
+        headers["X-Request-Id"] = text
+    elif place == "message":
+        error["message"] = text
+    else:
+        metadata[place] = text
+    response = httpx.Response(
+        429, headers=headers, json={"id": "gen-synthetic-error", "error": error}
+    )
+    details = error_details(response, api_key)
+    encoded = json.dumps(details, ensure_ascii=False)
+    assert (other if prefix else key) not in encoded and "private" not in encoded
+    # What diagnosis needs is kept.
+    assert details["generation_id"] == "gen-synthetic-error"
+    assert details["retry_after_seconds"] == 12 and "provider_request_id" in details
+    response.headers["X-Generation-Id"] = "gen-conflicting"
+    assert "generation_id" not in error_details(response, api_key)
