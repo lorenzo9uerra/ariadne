@@ -142,14 +142,13 @@ def transcript(trajectory: dict, limit: int) -> tuple[str, bool]:
         lines, clipped = [], False
         for step in steps:
             lines.append(f"[step {step['step_id']} {step['source']}]")
-            parts = [str(step["message"])] if step.get("message") else []
+            parts = [("", str(step["message"]))] if step.get("message") else []
             for call in step.get("tool_calls") or []:
                 arguments = json.dumps(call.get("arguments"), ensure_ascii=False)
                 parts.append((f"call {call['function_name']}: ", arguments))
             for result in (step.get("observation") or {}).get("results", []):
                 parts.append(("output: ", str(result.get("content"))))
-            for part in parts:
-                label, body = part if isinstance(part, tuple) else ("", part)
+            for label, body in parts:
                 clipped |= len(body) > size
                 lines.append(label + clip(body, size))
         text = "\n".join(lines)
