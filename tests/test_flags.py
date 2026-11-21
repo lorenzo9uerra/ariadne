@@ -3,6 +3,8 @@
 import re
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from benchmark.answers import inner, match_flag
 from benchmark.flags import generate_flag
@@ -65,3 +67,27 @@ def test_wrong_or_multiple_distinct_candidates_rejected(submission):
 def test_inner_rejects_invalid_flag_shapes(flag):
     with pytest.raises(ValueError, match="Expected flag"):
         inner(flag)
+
+
+PROSE = st.text(" .:,abcFLAGxyz012\n{}", max_size=20)
+VALUE = st.text("aBc012", min_size=1, max_size=8)
+
+
+@given(VALUE, PROSE, PROSE, st.sampled_from(["wrapped", "bare"]), VALUE)
+def test_only_the_exact_flag_alone_is_accepted(value, before, after, form, other):
+    flag = f"flag{{{value}}}"
+    shown = flag if form == "wrapped" else value
+    submission = before + shown + after
+    accepted, _ = match_flag(submission, flag)
+    candidates = set(re.findall(r"flag\{[^{}\s]+\}", submission.strip()))
+    # Accepted means the exact flag, and never one of several guesses.
+    if accepted:
+        assert candidates <= {flag} and (
+            candidates or submission.strip() in (flag, value)
+        )
+    # The flag alone, wrapped and surrounded by plain prose, always counts.
+    if form == "wrapped" and not set(before + after) & set("{}"):
+        assert accepted
+    # A second, different wrapped flag anywhere makes the submission fail.
+    if other != value:
+        assert not match_flag(f"{submission} flag{{{other}}}", flag)[0]
