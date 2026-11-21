@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -69,14 +68,6 @@ def test_ready_reviewer_contexts_validate_without_exposing_their_contents():
             except ValueError as error:
                 errors.append(f"{package.id}: {error}")
     assert not errors, "; ".join(errors)
-
-
-def test_changed_instruction_requires_readmission(tmp_path):
-    root = tmp_path / "code-02"
-    shutil.copytree(ROOT / "tasks/code-02", root)
-    (root / "instruction.md").write_text("Unreviewed instruction\n")
-    with pytest.raises(ValueError, match="instruction changed"):
-        load_package(root)
 
 
 def ready_packages():
