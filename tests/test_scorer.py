@@ -136,6 +136,8 @@ def rewards(draw):
     answer_type = draw(st.sampled_from(["json", "flag"]))
     names = METRICS if answer_type == "json" else ("flag_correct",)
     scores = {name: draw(st.integers(0, 1)) for name in names}
+    if draw(st.booleans()):
+        return answer_type, scores, None, {}  # No weights: success alone counts.
     weight = st.floats(0, 1000, allow_nan=False)
     weights = {"task_success": draw(st.floats(0.001, 1000))}
     weights |= {name: draw(weight) for name in draw(st.sets(st.sampled_from(names)))}
@@ -151,8 +153,9 @@ def test_rewards_add_up_and_only_their_own_record_validates(drawn, forgery):
     values = reward_values(scores, weights, milestones)
     success = int(all(scores.values()))
     components = scores | milestones | {"task_success": success}
+    counted = weights or {"task_success": 1.0}
     assert values == components | {
-        "reward": math.fsum(components[name] * w for name, w in weights.items())
+        "reward": math.fsum(components[name] * w for name, w in counted.items())
     }
     assert is_success(values) is bool(success)
     validate_rewards(values, answer_type, weights)
