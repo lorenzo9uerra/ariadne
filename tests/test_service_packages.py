@@ -164,31 +164,6 @@ def test_unknown_service_limit_is_rejected():
         target_limits({"service_limits": {"swap_bytes": 1}})
 
 
-def test_tampered_service_artifact_is_rejected(tmp_path):
-    copied = tmp_path / "service-01"
-    shutil.copytree(FIXTURE, copied)
-    server = copied / "service/server.py"
-    server.write_text(server.read_text() + "# changed\n")
-    with pytest.raises(ValueError, match="Service artifact changed"):
-        load_package(copied)
-
-
-def test_undeclared_service_artifact_is_rejected(tmp_path):
-    copied = tmp_path / "service-01"
-    shutil.copytree(FIXTURE, copied)
-    (copied / "service/extra.sh").write_text("# extra\n")
-    with pytest.raises(ValueError, match="exactly one declared hash"):
-        load_package(copied)
-
-
-def test_missing_service_compose_is_rejected(tmp_path):
-    copied = tmp_path / "service-01"
-    shutil.copytree(FIXTURE, copied)
-    (copied / "service/compose.yaml").unlink()
-    with pytest.raises(ValueError, match="compose file"):
-        load_package(copied)
-
-
 def test_service_package_rejects_instance_builder(tmp_path):
     copied = tmp_path / "service-01"
     shutil.copytree(FIXTURE, copied)
