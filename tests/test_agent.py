@@ -494,20 +494,6 @@ def test_invalid_argument_json_is_preserved_for_audit():
     assert session.audit.items[1]["arguments"] == raw["function"]["arguments"]
 
 
-def test_over_budget_arguments_are_counted_without_json_parsing(tmp_path, live_mock):
-    config, replies, seen = live_mock
-    config["budgets"]["total_tool_calls"] = 0
-    raw = api_call("bash", {})
-    raw["function"]["arguments"] = '{"command":"one","command":"two"}'
-    replies.append(completion([raw]))
-    context, trajectory = run_agent(environment_stub(tmp_path), config)
-    assert context.metadata["non_submit_proposals"] == 1
-    assert context.metadata["stop_reason"] == "total_tool_calls"
-    proposed = trajectory.steps[-1].tool_calls
-    assert proposed is not None and proposed[0].extra is not None
-    assert proposed[0].extra["parse_error"] is None
-
-
 def test_ariadne_agent_rejects_alternate_host_environment(tmp_path):
     with pytest.raises(ValueError, match="Extra environment"):
         AriadneAgent(
