@@ -99,12 +99,11 @@ with the model and search APIs mocked, so it costs nothing. It checks that
 The reference runs from A1 then take the real harness end to end, one run per
 task, and `benchmark check` confirms each run's evidence and cleanup.
 
-Many of the tests are property tests, which try many generated inputs. They
-use the same inputs on every run, so a failure can be reproduced. A pull
-request that changes a property test, or the code it covers, also runs that
-test with new inputs (`HYPOTHESIS_PROFILE=explore`), which can reach cases the
-regular runs never try. A weekly CI job does the same for the whole suite.
-Any case found that way is added to the regular tests.
+Many of the tests are property tests, which try many generated inputs. CI
+runs them twice. The first run uses the same inputs as every local run, so a
+failure can be reproduced, and the second uses new inputs, which can reach
+cases the fixed ones never try. A case found that way is added to the
+regular tests.
 
 - [ ] The full suite passes, Docker tests included:
       `RUN_DOCKER=1 uv run pytest`.
