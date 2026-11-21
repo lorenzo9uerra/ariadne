@@ -104,9 +104,24 @@ def validate_addresses(addresses: list[str]) -> tuple[str, ...]:
         raise ValueError("No resolved addresses")
     for value in addresses:
         address = ipaddress.ip_address(value)
+        if address.version == 6 and address in NAT64_LOCAL:
+            raise ValueError("Non-public address forbidden")
+        if address.version == 6 and any(address in n for n in EMBEDDED_IPV4):
+            # The IPv4 address inside it is the one actually reached.
+            address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
         if not address.is_global or address.is_multicast:
             raise ValueError("Non-public address forbidden")
     return tuple(addresses)
+
+
+# IPv6 forms that carry an IPv4 address in their last 32 bits: NAT64's
+# well-known prefix and the deprecated IPv4-compatible form. Python's
+# is_global accepts both even when the IPv4 address inside is private.
+EMBEDDED_IPV4 = (
+    ipaddress.IPv6Network("64:ff9b::/96"),
+    ipaddress.IPv6Network("::/96"),
+)
+NAT64_LOCAL = ipaddress.IPv6Network("64:ff9b:1::/48")  # Local use only.
 
 
 class TextExtractor(HTMLParser):
