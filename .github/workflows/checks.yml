@@ -40,3 +40,9 @@ jobs:
         run: uv run --no-sync ty check
       - name: Run unpaid tests
         run: uv run --no-sync pytest -q --tb=no
+      # The same tests with new property-test inputs, which can reach cases
+      # the fixed ones never try. A failure prints the input that caused it.
+      - name: Run unpaid tests with new inputs
+        env:
+          HYPOTHESIS_PROFILE: explore
+        run: uv run --no-sync pytest -q --tb=short
