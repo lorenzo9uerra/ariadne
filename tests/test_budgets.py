@@ -1,6 +1,7 @@
 """An attempt's limits: the settings, their overrides, the classifier allowance and the clock."""
 
 import copy
+from unittest.mock import patch
 
 import pytest
 from hypothesis import given
@@ -95,9 +96,11 @@ def test_the_classifier_allowance_covers_every_web_call_at_its_worst(
 def test_retry_waits_extend_the_attempt_only_up_to_the_allowance(
     seconds, allowance, waits
 ):
-    clock = AttemptClock(seconds, allowance)
-    for wait in waits:
-        clock.exclude(wait)
+    # A fixed clock, so the host's uptime adds no rounding error.
+    with patch("benchmark.budgets.time.monotonic", return_value=0.0):
+        clock = AttemptClock(seconds, allowance)
+        for wait in waits:
+            clock.exclude(wait)
     expected = min(allowance, sum(max(0.0, wait) for wait in waits))
     assert clock.excluded == pytest.approx(expected)
     assert clock.deadline - clock.started == pytest.approx(seconds + expected)
