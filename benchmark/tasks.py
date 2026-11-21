@@ -374,6 +374,7 @@ def read_trial_instance(package: Package, trial_dir: Path, trial_id: str) -> Pac
         # Only the flag belongs in this folder, which was uploaded whole to the target.
         if (
             record["sha256"] != package.manifest["source"]["sha256"]
+            or not flag_path.parent.is_dir()
             or {path.name for path in flag_path.parent.iterdir()} != {"flag.txt"}
             or flag_path.is_symlink()
             or not flag_path.is_file()
