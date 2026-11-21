@@ -3,7 +3,7 @@
 set -eu
 here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 status=0
-python3 "$here/what_solve.py" /workspace/what > /workspace/solver.out || status=$?
+python3 "$here/what_solve.py" /workspace/program > /workspace/solver.out || status=$?
 extract_status=0
 if [ "$status" -eq 0 ]; then
     python3 - << 'PY' || extract_status=$?
