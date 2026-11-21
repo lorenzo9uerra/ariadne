@@ -8,8 +8,9 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -21,6 +22,8 @@ from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.task.task import Task
 from harbor.models.trajectories import Trajectory
 from harbor.models.trial.paths import TrialPaths
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 
 from benchmark import verifier
 from benchmark.answers import METRICS, reward_values
@@ -39,7 +42,6 @@ from sandbox.environment import (
 from tests.support import (
     SAFE,
     WRONG,
-    ScriptedAgent,
     assert_isolation_and_cleanup,
     export_review_task,
     export_task,
@@ -101,84 +103,6 @@ def test_shared_image_is_prepared_during_startup(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="Synthetic build failed"):
         asyncio.run(environment.start(force_build=False))
     start.assert_not_awaited()
-
-
-@pytest.mark.parametrize("streamed", [False, True])
-def test_host_output_overflow_stops_the_docker_client(monkeypatch, streamed):
-    monkeypatch.setattr("sandbox.environment.TRANSPORT_BYTES", 4096)
-
-    async def check():
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-c",
-            "import os,time; os.write(1,b'x'*32768); time.sleep(30)",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        seen = []
-
-        async def callback(text, stream):
-            seen.append(text)
-
-        try:
-            with pytest.raises(OutputLimitExceeded):
-                if streamed:
-                    await AriadneDockerEnvironment._collect_streamed_output(
-                        process, timeout_sec=5, on_output=callback
-                    )
-                else:
-                    await AriadneDockerEnvironment._collect_buffered_output(
-                        process, timeout_sec=5
-                    )
-            assert process.returncode is not None
-            assert sum(map(len, seen)) <= 4096
-        finally:
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
-
-    asyncio.run(check())
-
-
-def test_streamed_output_arrives_as_whole_lines():
-    async def check():
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-c",
-            "import os; os.write(1, b'first\\nsec'); os.write(1, b'ond\\ntail')",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        seen = []
-
-        async def callback(text, stream):
-            seen.append(text)
-
-        result = await AriadneDockerEnvironment._collect_streamed_output(
-            process, timeout_sec=5, on_output=callback
-        )
-        assert seen == ["first\n", "second\n", "tail"]
-        assert result.stdout == "first\nsecond\ntail"
-
-    asyncio.run(check())
-
-
-def test_upload_stages_elf_handouts_executable(tmp_path):
-    """Player binaries arrive executable; text handouts keep their mode."""
-    script = Path(__file__).resolve().parents[1] / "sandbox/container/upload.py"
-    payload = {
-        "program": base64.b64encode(b"\x7fELF" + b"\x00" * 60).decode(),
-        "notes.txt": base64.b64encode(b"plain text\n").decode(),
-    }
-    result = subprocess.run(
-        [sys.executable, str(script), str(tmp_path)],
-        input=json.dumps(payload),
-        text=True,
-        capture_output=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert (tmp_path / "program").stat().st_mode & 0o111
-    assert not (tmp_path / "notes.txt").stat().st_mode & 0o111
 
 
 def test_target_seccomp_is_available_to_the_local_compose_client(tmp_path, monkeypatch):
@@ -305,22 +229,13 @@ def test_container_checks_catch_weakened_settings(monkeypatch, change, failed):
     assert [name for name, passed in checks.items() if not passed] == [failed]
 
 
-def test_compose_files_may_substitute_only_the_harness_variables(tmp_path):
-    text = (
-        "cpus: ${ARIADNE_CPUS:?set}\nimage: ariadne-sandbox:$SANDBOX_IMAGE_TAG\n"
-        "command: echo $$HOME ${OPENROUTER_API_KEY} $$$TAVILY_API_KEY\n"
-    )
-    # $$$NAME is a literal dollar sign followed by a substitution.
-    assert checks.compose_substitutions(text) == {
-        "ARIADNE_CPUS",
-        "SANDBOX_IMAGE_TAG",
-        "OPENROUTER_API_KEY",
-        "TAVILY_API_KEY",
-    }
+def test_a_compose_file_that_substitutes_a_host_variable_is_refused(tmp_path):
     environment = object.__new__(AriadneDockerEnvironment)
     environment.environment_dir = tmp_path
     environment._service_task = False
-    (tmp_path / "docker-compose.yaml").write_text(text)
+    (tmp_path / "docker-compose.yaml").write_text(
+        "command: echo ${OPENROUTER_API_KEY}\n"
+    )
     with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         environment._check_definition()
 
@@ -490,20 +405,6 @@ def test_declared_milestone_without_a_check_is_an_evaluator_error(
     with pytest.raises(ValueError, match="milestones function"):
         verifier.main()
     assert not (tmp_path / "reward.json").exists()
-
-
-@pytest.mark.parametrize(
-    "record",
-    [
-        {"../reward.json": ""},
-        {"reward.json": ""},
-        {"submission.json": "!"},
-        {"submission.json": base64.b64encode(b"x" * (SUBMISSION_BYTES + 1)).decode()},
-    ],
-)
-def test_host_export_rejects_untrusted_records(record):
-    with pytest.raises(ValueError):
-        decode_export(json.dumps(record), submission=True)
 
 
 def test_container_logs_cannot_overwrite_host_trajectory(tmp_path, monkeypatch):
@@ -704,36 +605,6 @@ def test_oracle_download_rejects_host_symlinks(oracle_download, tmp_path, case):
         asyncio.run(environment.download_file("/logs/agent/oracle.txt", target))
     assert original.read_bytes() == b"host record"
     assert not calls
-
-
-def test_interrupted_script_keeps_the_pending_call(tmp_path, monkeypatch):
-    environment = object.__new__(AriadneDockerEnvironment)
-
-    async def interrupted(*args, **kwargs):
-        raise asyncio.CancelledError
-
-    monkeypatch.setattr(environment, "exec", interrupted)
-    agent = ScriptedAgent(logs_dir=tmp_path, commands=["synthetic pending command"])
-    agent.session_id = "synthetic-interruption"
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(agent.run("Synthetic instruction", environment, AgentContext()))
-    trajectory = Trajectory.model_validate_json(
-        (tmp_path / "trajectory.json").read_text()
-    )
-    assert len(trajectory.steps) == 2
-    assert trajectory.steps[-1].tool_calls
-    assert trajectory.steps[-1].tool_calls[0].arguments == {
-        "command": "synthetic pending command"
-    }
-    assert trajectory.steps[-1].observation is None
-
-
-@pytest.mark.parametrize(
-    "name", ["../x", "session/../../x", "/x", "session//x", "session/./x", "session\\x"]
-)
-def test_nested_log_paths_cannot_escape_export(name):
-    with pytest.raises(ValueError):
-        decode_export(json.dumps({name: ""}), submission=False)
 
 
 @pytest.fixture(scope="module")
@@ -1033,3 +904,232 @@ def test_command_deadline_retains_proposal_and_removes_containers(
     assert trajectory.steps[-1].tool_calls
     assert trajectory.steps[-1].observation is None
     assert_isolation_and_cleanup(folder)
+
+
+# File transfer between host and container, run on the host.
+
+NAME = st.text("abcxyz019._- ", min_size=1, max_size=8).filter(
+    lambda name: name not in (".", "..")
+)
+TREE = st.dictionaries(
+    st.lists(NAME, min_size=1, max_size=3).map("/".join),
+    st.binary(max_size=300) | st.sampled_from([b"\x7fELF" + b"\x00" * 60, b""]),
+    max_size=8,
+).filter(
+    # A path cannot be both a file and a directory.
+    lambda tree: not any(b.startswith(a + "/") for a in tree for b in tree)
+)
+
+
+def run_export(logs: Path, name: str, limit: int, submission: bool):
+    """sandbox/container/export.py, with /logs pointing at a host directory."""
+    from sandbox.environment import EXPORT
+
+    source = EXPORT.replace('os.open("/logs",', f"os.open({str(logs)!r},")
+    assert source != EXPORT
+    return subprocess.run(
+        [sys.executable, "-I", "-c", source, f"/logs/{name}", str(limit)]
+        + ["yes" if submission else "no"],
+        capture_output=True,
+        text=True,
+    )
+
+
+@settings(max_examples=min(settings().max_examples, 200))
+@given(
+    TREE,
+    st.integers(0, 1500),
+    st.sampled_from([None, "symlink", "hardlink", "fifo"]),
+)
+def test_exported_files_come_back_whole_or_not_at_all(tree, limit, special):
+    with tempfile.TemporaryDirectory() as folder:
+        logs = Path(folder)
+        (logs / "agent").mkdir()
+        for name, data in tree.items():
+            path = logs / "agent" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        if special is not None:
+            (logs / "outside").write_bytes(b"host record")
+            unsafe = logs / "agent" / "unsafe"
+            if special == "symlink":
+                unsafe.symlink_to(logs / "outside")
+            elif special == "hardlink":
+                os.link(logs / "outside", unsafe)
+            else:
+                os.mkfifo(unsafe)
+        result = run_export(logs, "agent", limit, submission=False)
+    # Only regular files with one link, within the byte limit, ever leave.
+    if special is None and sum(map(len, tree.values())) <= limit:
+        assert result.returncode == 0, result.stderr
+        assert decode_export(result.stdout, submission=False) == tree
+    else:
+        assert result.returncode != 0
+
+
+@settings(max_examples=min(settings().max_examples, 200))
+@given(st.dictionaries(NAME, st.binary(max_size=300) | st.just(b"\x7fELF\x02")))
+def test_uploaded_files_arrive_whole_and_handout_binaries_executable(files):
+    script = ROOT / "sandbox/container/upload.py"
+    payload = {name: base64.b64encode(data).decode() for name, data in files.items()}
+    with tempfile.TemporaryDirectory() as folder:
+        logs = Path(folder)
+        (logs / "artifacts").mkdir()
+        result = subprocess.run(
+            [sys.executable, "-I", str(script), str(logs / "artifacts")],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 0, result.stderr
+        for name, data in files.items():
+            mode = (logs / "artifacts" / name).stat().st_mode & 0o777
+            assert mode == (0o755 if data.startswith(b"\x7fELF") else 0o600)
+        # Exporting them again gives back exactly what was uploaded.
+        exported = run_export(logs, "artifacts", 10_000, submission=False)
+    assert decode_export(exported.stdout, submission=False) == files
+
+
+def safe_name(name: str) -> bool:
+    """A relative path that stays inside the folder it is written to."""
+    parts = name.split("/")
+    return (
+        all(part not in ("", ".", "..") for part in parts)
+        and len(parts) <= 17
+        and "\\" not in name
+        and "\x00" not in name
+    )
+
+
+UNTRUSTED = st.text("ab./\\\x00 ", max_size=10) | st.sampled_from(
+    [
+        "..",
+        "/etc/passwd",
+        "a/../../b",
+        "a/./b",
+        "submission.json",
+        "notes.txt",
+        "logs/raw.jsonl",
+    ]
+)
+
+
+@given(
+    st.dictionaries(
+        UNTRUSTED, st.binary(max_size=64) | st.just(b"x" * (SUBMISSION_BYTES + 1))
+    ),
+    st.booleans(),
+    st.booleans(),
+)
+@example({"../reward.json": b""}, True, False)
+@example({"notes.txt": b""}, True, False)  # A safe name, but not a submission.
+@example({"submission.json": b"x" * (SUBMISSION_BYTES + 1)}, True, False)
+@example({"submission.json": b""}, True, True)
+@example({"session/../../x": b""}, False, False)
+def test_the_host_accepts_an_export_only_with_safe_names_within_its_limit(
+    record, submission, corrupt
+):
+    from sandbox.environment import LOG_BYTES
+
+    encoded = {name: base64.b64encode(data).decode() for name, data in record.items()}
+    if corrupt and encoded:
+        encoded[next(iter(encoded))] = "!"
+    accepted = (
+        all(safe_name(name) for name in record)
+        and (not submission or set(record) <= {"submission.json"})
+        and sum(map(len, record.values()))
+        <= (SUBMISSION_BYTES if submission else LOG_BYTES)
+        and not (corrupt and record)
+    )
+    if accepted:
+        assert decode_export(json.dumps(encoded), submission) == record
+    else:
+        with pytest.raises(ValueError):
+            decode_export(json.dumps(encoded), submission)
+
+
+# Docker output on the host.
+
+PIECE = st.text("ab\né", max_size=40).map(str.encode) | st.just(b"y" * 3000)
+
+
+@settings(max_examples=min(settings().max_examples, 100))
+@given(st.lists(PIECE, max_size=6), st.booleans())
+def test_docker_output_arrives_whole_in_lines_or_stops_at_the_limit(pieces, streamed):
+    limit = 4096
+    total = b"".join(pieces)
+    writer = (
+        "import base64,json,os,sys,time\n"
+        "for piece in json.loads(sys.argv[1]): os.write(1, base64.b64decode(piece))\n"
+        f"time.sleep({30 if len(total) > limit else 0})"
+    )
+    seen = []
+
+    async def callback(text, stream):
+        seen.append(text)
+
+    async def collect():
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            writer,
+            json.dumps([base64.b64encode(piece).decode() for piece in pieces]),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            result = await AriadneDockerEnvironment._collect_buffered_output(
+                process, timeout_sec=10, on_output=callback if streamed else None
+            )
+            return result, process
+        except OutputLimitExceeded:
+            return None, process
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+
+    with patch("sandbox.environment.TRANSPORT_BYTES", limit):
+        result, process = asyncio.run(collect())
+    if len(total) > limit:
+        # The Docker client is stopped, and nothing past the limit is passed on.
+        assert result is None and process.returncode is not None
+        assert sum(len(text.encode()) for text in seen) <= limit
+        return
+    assert result is not None
+    text = total.decode(errors="replace")
+    assert result.stdout == (text or None)
+    if streamed:
+        assert "".join(seen) == text
+        assert all(line.endswith("\n") for line in seen[:-1])
+        assert all("\n" not in line[:-1] for line in seen)
+
+
+def substitutions(text: str) -> set[str]:
+    """Compose's rules, one character at a time: $$ is a dollar sign, and $NAME
+    and ${NAME...} substitute NAME."""
+    names, i = set(), 0
+    start = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
+    rest = start | set("0123456789")
+    while i < len(text):
+        if text[i] != "$":
+            i += 1
+        elif text[i + 1 : i + 2] == "$":
+            i += 2
+        else:
+            j = i + 1 + (text[i + 1 : i + 2] == "{")
+            if j < len(text) and text[j] in start:
+                end = j + 1
+                while end < len(text) and text[end] in rest:
+                    end += 1
+                names.add(text[j:end])
+                i = end
+            else:
+                i += 1
+    return names
+
+
+@given(st.text("${}:?-AZ_a1 \n", max_size=60))
+@example("cpus: ${ARIADNE_CPUS:?set} command: echo $$HOME $$$TAVILY_API_KEY")
+def test_compose_substitutions_follow_composes_rules(text):
+    assert checks.compose_substitutions(text) == substitutions(text)
