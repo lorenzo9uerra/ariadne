@@ -462,9 +462,6 @@ def test_any_change_to_an_admitted_file_blocks_admission(kind, change, which, po
         load_package(root)  # Admitted as built.
         names = admitted_files(root)
         name = names[which % len(names)]
-        if change == "symlink" and name == "instruction.md":
-            # The instruction is read through any link; its hash still protects it.
-            change = "append"
         tamper(root / name, change, position)
         with pytest.raises((ValueError, OSError)):
             load_package(root)

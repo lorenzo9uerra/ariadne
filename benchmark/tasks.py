@@ -217,7 +217,7 @@ def load_package(root: Path) -> Package:
     manifest = config["metadata"]["ariadne"]
     if manifest.get("instruction_sha256"):
         check_hash(
-            root / "instruction.md",
+            package_path(root, "instruction.md"),
             manifest["instruction_sha256"],
             "Task instruction changed; review and re-admit",
         )

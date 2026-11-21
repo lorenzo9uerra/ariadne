@@ -166,7 +166,7 @@ def test_rewards_add_up_and_only_their_own_record_validates(drawn, forgery):
     elif forgery == "task_success":
         forged["task_success"] = 1 - success
     elif forgery == "added":
-        forged["unexpected"] = 0
+        forged["__unexpected__"] = 0
     else:
         del forged[next(iter(scores))]
     with pytest.raises(ValueError):
