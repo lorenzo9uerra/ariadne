@@ -139,9 +139,9 @@ def transcript(trajectory: dict, limit: int) -> tuple[str, bool]:
     """
     steps = [step for step in trajectory.get("steps", []) if step["source"] != "system"]
     for size in (4000, 2000, 800, 300, 120):
-        lines, clipped = [], False
+        blocks, clipped = [], False
         for step in steps:
-            lines.append(f"[step {step['step_id']} {step['source']}]")
+            lines = [f"[step {step['step_id']} {step['source']}]"]
             parts = [("", str(step["message"]))] if step.get("message") else []
             for call in step.get("tool_calls") or []:
                 arguments = json.dumps(call.get("arguments"), ensure_ascii=False)
@@ -151,13 +151,25 @@ def transcript(trajectory: dict, limit: int) -> tuple[str, bool]:
             for label, body in parts:
                 clipped |= len(body) > size
                 lines.append(label + clip(body, size))
-        text = "\n".join(lines)
+            blocks.append(lines)
+        text = "\n".join("\n".join(block) for block in blocks)
         if tokens(text) <= limit:
             return text, clipped
-    # Still too long: keep the start and the end of the attempt.
-    while tokens(text) > limit and len(lines) > 2:
-        del lines[len(lines) // 2]
-        text = "\n".join(lines)
+    # Remove middle steps, then trim the ends without removing their headings.
+    while blocks and tokens(text) > limit:
+        if len(blocks) > 2:
+            del blocks[len(blocks) // 2]
+        else:
+            first, last = blocks[0], blocks[-1]
+            if len(first) == len(last) == 1:
+                return "", True
+            if first is last:
+                del first[len(first) // 2]
+            elif len(first) >= len(last):
+                first.pop()
+            else:
+                del last[1]
+        text = "\n".join("\n".join(block) for block in blocks)
     return text, True
 
 

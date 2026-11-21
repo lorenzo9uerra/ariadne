@@ -1745,42 +1745,53 @@ def test_a_reflected_query_is_most_of_its_words_in_order_in_the_path(
 
 @given(
     st.lists(
-        st.tuples(st.text(" abcdefgh", max_size=3000), st.text(" xyz.", max_size=6000)),
+        st.tuples(
+            st.text(" abcdefgh", max_size=3000),
+            st.lists(st.text(" xyz.", max_size=6000), min_size=1, max_size=3),
+        ),
         min_size=1,
         max_size=30,
     ),
     st.integers(1500, 4000),
 )
-@example([("", "x" * 6000)], 4000)  # One output clipped at its character limit.
-@example([("word " * 600, "x" * 20000)] * 100, 2000)  # Only the ends fit.
+@example([("", ["x" * 6000])], 4000)  # One output clipped at its character limit.
+@example([("word " * 600, ["x" * 20000])] * 100, 2000)  # Only the ends fit.
+@example([("", ["0 ! a ? b # " * 20] * 10)] * 2, 400)  # Both steps need trimming.
 def test_the_transcript_for_triage_fits_and_says_when_it_was_cut(steps, limit):
     from benchmark.attempt_review import transcript
     from benchmark.classifiers import tokens
 
+    ending = "Final synthetic output."
+    message, outputs = steps[-1]
+    steps = steps[:-1] + [(message, [*outputs, ending])]
     trajectory = {
         "steps": [
             {
                 "step_id": number,
                 "source": "agent",
                 "message": message,
-                "observation": {"results": [{"content": output}]},
+                "observation": {"results": [{"content": output} for output in outputs]},
             }
-            for number, (message, output) in enumerate(steps, 1)
+            for number, (message, outputs) in enumerate(steps, 1)
         ]
     }
     # The whole transcript, as it reads when nothing is cut.
     whole = "\n".join(
         line
-        for number, (message, output) in enumerate(steps, 1)
+        for number, (message, outputs) in enumerate(steps, 1)
         for line in [f"[step {number} agent]", *([message] if message else [])]
-        + [f"output: {output}"]
+        + [f"output: {output}" for output in outputs]
     )
-    fits = all(len(m) <= 4000 and len(o) <= 4000 for m, o in steps)
+    fits = all(
+        len(message) <= 4000 and all(len(output) <= 4000 for output in outputs)
+        for message, outputs in steps
+    )
     fits = fits and tokens(whole) <= limit
     text, cut = transcript(trajectory, limit)
     assert tokens(text) <= limit
-    # It keeps the start and the end of the attempt.
-    assert text.startswith("[step 1 agent]") and f"[step {len(steps)} agent]" in text
+    assert text.startswith("[step 1 agent]")
+    _, _, last_step = text.partition(f"[step {len(steps)} agent]\n")
+    assert last_step.endswith(f"output: {ending}")
     assert cut is not fits
     if fits:
         assert text == whole
