@@ -60,6 +60,25 @@ def render_prompt(budgets: dict) -> str:
 CAPTURE = script("capture.sh")
 
 
+def capture_call(command: str, timeout: float, limit: int) -> tuple[str, dict]:
+    """The exec command and environment that run one agent command in capture.sh."""
+    wrapper = shlex.join(
+        [
+            "timeout",
+            "--kill-after=1",
+            str(timeout),
+            "/bin/bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+            CAPTURE,
+            "capture",
+            str(limit),
+        ]
+    )
+    return wrapper, {"COMMAND": command}
+
+
 def decode_capture(text: str, limit: int) -> dict:
     """Read capture.sh's five lines: exit status, the two stream sizes, and the
     two streams in base64, each checked against the byte limit."""
@@ -435,24 +454,10 @@ class AgentAttempt:
             raise TimeoutError("Attempt deadline reached")
         limit = self.limits["bash_output_bytes_per_stream"]
         timeout = min(self.limits["bash_timeout_seconds"], remaining)
-        capture = shlex.join(
-            [
-                "timeout",
-                "--kill-after=1",
-                str(timeout),
-                "/bin/bash",
-                "--noprofile",
-                "--norc",
-                "-c",
-                CAPTURE,
-                "capture",
-                command,
-                str(limit),
-            ]
-        )
+        wrapper, env = capture_call(command, timeout, limit)
         try:
             result = await self.environment.exec(
-                capture, user="1000:1000", timeout_sec=timeout + 5
+                wrapper, env=env, user="1000:1000", timeout_sec=timeout + 5
             )
         except OutputLimitExceeded:
             self.shell_failure(
