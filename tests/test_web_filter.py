@@ -322,6 +322,31 @@ def test_live_forbidden_response_is_withheld(tmp_path):
     assert result[0]["text"] == WITHHELD
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [lambda: httpx.Response(503), httpx.ReadTimeout],
+    ids=["transient status", "connection timeout"],
+)
+def test_a_retried_classifier_request_counts_in_full_and_the_review_goes_on(
+    tmp_path, failure
+):
+    # A pilot attempt stopped when a timed-out first request had no usage.
+    def reply(n):
+        if n == 1:
+            if isinstance(failure, type):
+                raise failure("synthetic")
+            return failure()
+        return chat_reply(GOOD)
+
+    result, session, bodies, ledger, _ = live_fetch(tmp_path, reply)
+    assert "Generic library documentation." in result[0]["text"]
+    budgets = load_draft()["budgets"]
+    retried = budgets["filter_max_input_tokens"] + budgets["filter_max_output_tokens"]
+    assert len(bodies) == 3 and session.counters.filter_tokens == retried + 2 * 920
+    # The failed request keeps its hold until a charge is confirmed.
+    assert ledger.totals()["held_usd"] > 0
+
+
 def test_live_provider_failure_stops_before_retrieval(tmp_path):
     result, session, _, _, backend = live_fetch(tmp_path, lambda n: httpx.Response(401))
     assert "termination" in str(result) and not backend.gets

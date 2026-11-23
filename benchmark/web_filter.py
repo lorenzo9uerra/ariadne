@@ -390,7 +390,9 @@ class BudgetedClassifier:
                     raise BudgetExceeded("filter_request_tokens")
                 used += sent + received
             else:
-                if result.status == "ok":
+                # Only the request that returned the verdict must report usage.
+                # A retried request never returned one and counts in full.
+                if result.status == "ok" and request is result.requests[-1]:
                     raise CostAccountingError(
                         "Classifier token usage is missing or invalid"
                     )
