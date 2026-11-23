@@ -1513,13 +1513,31 @@ def test_resume_skips_completed_trial_with_missing_cost(monkeypatch):
     assert experiment.open_slots(Path("synthetic"), TASK) == []
 
 
-def test_pending_billing_does_not_bypass_failed_isolation(tmp_path):
-    for role in ("agent", "verifier"):
+@pytest.mark.parametrize(
+    ("records", "failed", "message"),
+    [
+        # A failed check stops the job as an isolation failure, whatever else failed.
+        (("agent", "verifier"), True, "Isolation or cleanup evidence failed"),
+        (("agent",), True, "Isolation or cleanup evidence failed"),
+        ((), False, "Isolation or cleanup evidence failed"),
+        # An agent that failed before the verifier ran is reported by its own error.
+        (("agent",), False, "failed before the verifier ran: SyntheticError"),
+    ],
+)
+def test_pending_billing_does_not_bypass_failed_isolation(
+    tmp_path, records, failed, message
+):
+    for role in records:
         (tmp_path / f"security-{role}.json").write_text(
             json.dumps(
-                {"checks": {"ok": role == "verifier"}, "cleanup_requested": True}
+                {
+                    "checks": {"ok": not (failed and role == "agent")},
+                    "cleanup_requested": True,
+                }
             )
         )
+    error = {"exception_type": "SyntheticError", "exception_message": "stopped"}
+    (tmp_path / "result.json").write_text(json.dumps({"exception_info": error}))
     row = {
         "attempt": "synthetic",
         "path": str(tmp_path / "result.json"),
@@ -1528,7 +1546,7 @@ def test_pending_billing_does_not_bypass_failed_isolation(tmp_path):
         "cost_usd": None,
         "held_usd": 0.4,
     }
-    with pytest.raises(RuntimeError, match="Isolation or cleanup evidence failed"):
+    with pytest.raises(RuntimeError, match=message):
         experiment.check_result(row)
 
 
