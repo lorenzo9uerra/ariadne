@@ -663,7 +663,7 @@ def test_mocked_ariadne_agent_through_native_job(
 )
 def test_mocked_agent_output_bounds_and_timeout_cleanup(tmp_path, live_mock):
     config, replies, seen = live_mock
-    config["budgets"]["agent_turns"] = 4
+    config["budgets"]["agent_turns"] = 5
     config["budgets"]["bash_timeout_seconds"] = 2
     size = config["budgets"]["bash_output_bytes_per_stream"]
     replies.extend(
@@ -688,6 +688,10 @@ def test_mocked_agent_output_bounds_and_timeout_cleanup(tmp_path, live_mock):
             ),
             completion(
                 [api_call("bash", {"command": "test ! -e /workspace/late-marker"})]
+            ),
+            # A pilot attempt ended when a pattern like this killed the capture.
+            completion(
+                [api_call("bash", {"command": "pkill -f own-marker; echo own-marker"})]
             ),
             completion([api_call("submit", {"answer": SAFE})]),
         ]
@@ -721,6 +725,10 @@ def test_mocked_agent_output_bounds_and_timeout_cleanup(tmp_path, live_mock):
     assert observations[1]["stdout_truncated"] and observations[1]["stderr_truncated"]
     assert len(observations[1]["stdout"]) == len(observations[1]["stderr"]) == size
     assert observations[2]["exit_code"] == 0
+    assert (observations[3]["exit_code"], observations[3]["stdout"]) == (
+        0,
+        "own-marker\n",
+    )
     assert_isolation_and_cleanup(path.parent)
 
 

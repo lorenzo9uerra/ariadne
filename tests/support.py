@@ -34,7 +34,7 @@ from harbor.models.trial.config import (
 from harbor.models.trial.config import TaskConfig as TrialTaskConfig
 from harbor.trial.trial import Trial
 
-from benchmark.agent import CAPTURE, decode_capture
+from benchmark.agent import capture_call, decode_capture
 from benchmark.answers import parse_answer
 from benchmark.audit import AuditTrail
 from benchmark.budgets import load_draft
@@ -335,23 +335,13 @@ class ScriptedAgent(BaseAgent):
             )
             steps.append(step)
             persist()  # Preserve the proposed call even if execution is interrupted.
-            capture = shlex.join(
-                [
-                    "timeout",
-                    "--kill-after=1",
-                    str(self.command_timeout),
-                    "/bin/bash",
-                    "--noprofile",
-                    "--norc",
-                    "-c",
-                    CAPTURE,
-                    "capture",
-                    command,
-                    str(self.limits["bash_output_bytes_per_stream"]),
-                ]
+            wrapper, env = capture_call(
+                command,
+                self.command_timeout,
+                self.limits["bash_output_bytes_per_stream"],
             )
             result = await environment.exec(
-                capture, user="1000:1000", timeout_sec=self.command_timeout + 5
+                wrapper, env=env, user="1000:1000", timeout_sec=self.command_timeout + 5
             )
             if result.return_code == 124:
                 raise TimeoutError("Shell command deadline reached")
