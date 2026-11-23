@@ -366,13 +366,23 @@ def open_slots(folder: Path, item: dict) -> list[tuple[int, dict | None]]:
 def isolation_evidence(trial: Path) -> list[dict]:
     """The trial's two isolation records, once every check passed and cleanup ran."""
     evidence = [json.loads(p.read_text()) for p in trial.glob("security-*.json")]
-    if len(evidence) != 2 or not all(
+    passed = all(
         e.get("checks") and all(e["checks"].values()) and e.get("cleanup_requested")
         for e in evidence
-    ):
-        raise RuntimeError(
-            f"Isolation or cleanup evidence failed; inspect {trial.name}"
-        )
+    )
+    if len(evidence) != 2 or not passed:
+        message = f"Isolation or cleanup evidence failed; inspect {trial.name}"
+        # A trial that failed in the agent leaves no verifier record. Its own
+        # error is then the cause to report; the job still stops.
+        result = trial / "result.json"
+        error = result.exists() and json.loads(result.read_text()).get("exception_info")
+        if len(evidence) == 1 and passed and error:
+            message = redact(
+                f"{trial.name} failed before the verifier ran: "
+                f"{error['exception_type']}: {error['exception_message']}. "
+                "Its sandbox passed every isolation check and was removed."
+            )
+        raise RuntimeError(message)
     return evidence
 
 
