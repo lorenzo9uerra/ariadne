@@ -365,7 +365,10 @@ def full_charge(is_byok: object, fee: object, upstream: object, byok: bool) -> D
     the other way, such as OpenRouter falling back to its own capacity, is
     refused."""
     if is_byok is not byok:
-        raise CostAccountingError("Billing does not match the route")
+        raise CostAccountingError(
+            'Billing does not match the route; a route with billing = "byok" in '
+            "benchmark/draft.toml needs the provider's key in OpenRouter's BYOK settings"
+        )
     return amount(fee) + (amount(upstream) if byok else 0)
 
 

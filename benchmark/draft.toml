@@ -208,8 +208,11 @@ context_tokens = 1048576
 
 [agents."z-ai/glm-5.3-flash"]
 generation_model = "z-ai/glm-5.3-flash-20260826"
-provider = "novita/fp8"
-provider_name = "Novita"
+# Moved from Novita on 2026-11-24, so earlier runs of this model are not
+# comparable with later ones.
+provider = "mistral"
+provider_name = "Mistral"
+billing = "byok"
 output_token_parameter = "max_tokens"
 token_encoding = "o200k_base"
 temperature = 0.6
@@ -217,13 +220,12 @@ reasoning_effort = "max"
 max_output_tokens = 131072
 
 [agents."z-ai/glm-5.3-flash".pricing]
-# Novita FP8 rates verified on 2026-10-19; includes its 44% discount.
+# Mistral rates verified on 2026-11-24.
 # https://openrouter.ai/api/v1/models/z-ai/glm-5.3-flash/endpoints
-input_per_million = "0.084"
-output_per_million = "0.28"
-cached_input_per_million = "0.0168"
+input_per_million = "0.15"
+output_per_million = "0.50"
+cached_input_per_million = "0.03"
 context_tokens = 1048576
-discount = "0.44"
 
 [agents."xiaomi/mimo-v2.6-pro"]
 generation_model = "xiaomi/mimo-v2.6-pro-20260921"
