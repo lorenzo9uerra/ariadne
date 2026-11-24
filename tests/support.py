@@ -669,13 +669,18 @@ def api_call(name, arguments, identifier="synthetic-call"):
     }
 
 
+# The web filter's classifier and the provider its route bills through.
+FILTER = load_draft()["models"]["web_filter"]
+FILTER_PROVIDER = "Alibaba"
+
+
 def endpoint_data():
-    settings = load_draft()["classifiers"]["deepseek-flash"]
+    settings = load_draft()["classifiers"][FILTER]
     return {
         "endpoints": [
             {
                 "tag": settings["provider"],
-                "provider_name": "DeepInfra",
+                "provider_name": FILTER_PROVIDER,
                 "pricing": {
                     "prompt": str(Decimal(settings["input_per_million"]) / 1_000_000),
                     "completion": str(
@@ -702,7 +707,7 @@ def chat_reply(content, cost=0.000012, finish="stop"):
         200,
         json={
             "id": "gen-1",
-            "provider": "DeepInfra",
+            "provider": FILTER_PROVIDER,
             "choices": [{"message": {"content": content}, "finish_reason": finish}],
             "usage": {
                 "prompt_tokens": 900,
