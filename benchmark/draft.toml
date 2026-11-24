@@ -109,6 +109,9 @@ disable_reasoning = true
 [agents."mistralai/mistral-large-4-0"]
 provider = "mistral/zdr"
 provider_name = "Mistral"
+# Served with the owner's Mistral key through OpenRouter's BYOK, so Mistral
+# bills that key under its account's data terms. See costs.billed_response.
+billing = "byok"
 output_token_parameter = "max_tokens"
 token_encoding = "o200k_base" # Context estimate only; provider usage is authoritative.
 temperature = 0.6
@@ -178,8 +181,11 @@ cached_input_per_million = "0.015"
 context_tokens = 1048576
 
 [agents."deepseek/deepseek-v4.1-flash-1017"]
-provider = "deepinfra/fp8/priority"
-provider_name = "DeepInfra"
+# Moved from DeepInfra's priority tier on 2026-11-24, so earlier runs of this
+# model are not comparable with later ones.
+provider = "mistral/fp8"
+provider_name = "Mistral"
+billing = "byok"
 output_token_parameter = "max_tokens"
 token_encoding = "o200k_base" # Context estimate only; provider usage is authoritative.
 temperature = 0.6
@@ -187,13 +193,12 @@ reasoning_effort = "max"
 max_output_tokens = 131072
 
 [agents."deepseek/deepseek-v4.1-flash-1017".pricing]
-# DeepInfra FP8 priority-tier rates verified on 2026-10-21; includes its 51% discount.
+# Mistral FP8 rates verified on 2026-11-24.
 # https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash-1017/endpoints
-input_per_million = "0.147"
-output_per_million = "0.441"
-cached_input_per_million = "0.00441"
+input_per_million = "0.30"
+output_per_million = "1.20"
+cached_input_per_million = "0.007"
 context_tokens = 1048576
-discount = "0.51"
 
 [agents."z-ai/glm-5.3-flash"]
 provider = "novita/fp8"

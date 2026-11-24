@@ -33,7 +33,7 @@ from benchmark.model import (
     pre_inference_rejection,
     retry_after,
 )
-from tests.support import TEST_MODEL, completion
+from tests.support import TEST_MODEL, agent_billing, completion
 
 
 @pytest.fixture
@@ -145,9 +145,7 @@ def test_backoff_and_optional_attempt_cap(
             return httpx.Response(
                 status, headers={"Retry-After": header} if header else {}
             )
-        data = completion()
-        data["provider"] = config["agent_route"]["provider_name"]
-        return httpx.Response(200, json=data)
+        return httpx.Response(200, json=completion(model="qwen/qwen3.8-flash"))
 
     model = model_factory(reply, config, attempt_limit=None)
     model.config["requests"].update(
@@ -253,8 +251,7 @@ def test_reasoning_profile_request_and_billing(model_factory, model_id):
         assert body[output] == config["budgets"]["agent_max_output_tokens"]
         other = {"max_tokens", "max_completion_tokens"} - {output}
         assert not other & set(body)
-        data = completion()
-        data["provider"] = config["agent_route"]["provider_name"]
+        data = completion(model=model_id)
         data["choices"][0]["message"] = message
         return httpx.Response(200, json=data)
 
@@ -288,9 +285,10 @@ def test_confirmed_error_charges_release_holds_before_retry(model_factory, monke
                         "id": f"gen-synthetic-{calls}",
                         "model": "mistralai/mistral-large-4-0",
                         "provider_name": None,
-                        "is_byok": False,
+                        "is_byok": agent_billing()["is_byok"],
                         "finish_reason": "error",
                         "total_cost": 0,
+                        "upstream_inference_cost": 0,
                     }
                 },
             )
@@ -326,7 +324,7 @@ def test_confirmed_error_charges_release_holds_before_retry(model_factory, monke
         "id",
         "model",
         "provider",
-        "byok",
+        "billing",
         "unfinished",
         "cost",
         "missing",
@@ -338,19 +336,22 @@ def test_error_lookup_requires_confirmed_matching_billing(model_factory, defect)
     config = load_draft(model=TEST_MODEL)
     config["budgets"]["model_retries"] = 0
     requests = []
+    billing = agent_billing("0.007")
     metadata = {
         "id": "gen-synthetic-error",
         "model": TEST_MODEL,
         "provider_name": config["agent_route"]["provider_name"],
-        "is_byok": False,
+        "is_byok": billing["is_byok"],
         "finish_reason": "error",
-        "total_cost": 0.007,
+        "total_cost": billing["fee"],
+        "upstream_inference_cost": billing["upstream"],
     }
     field_changes = {
         "id": ("id", "gen-other"),
         "model": ("model", "another/model"),
         "provider": ("provider_name", "Unexpected provider"),
-        "byok": ("is_byok", True),
+        # Billed the other way, as when OpenRouter falls back to its own capacity.
+        "billing": ("is_byok", not billing["is_byok"]),
         "unfinished": ("finish_reason", None),
         "cost": ("total_cost", None),
     }
@@ -458,8 +459,8 @@ def provider_reply(kind, number):
 
 def test_the_reservation_is_the_full_context_and_output_at_the_highest_rates():
     prices = Prices.from_config(load_draft(model=TEST_MODEL))
-    # (1,048,576 x $0.147 + 16,384 x $0.441) per million tokens.
-    assert prices.reservation(16384) == Decimal("0.161366016")
+    # (1,048,576 x $0.30 + 16,384 x $1.20) per million tokens.
+    assert prices.reservation(16384) == Decimal("0.3342336")
 
 
 @settings(max_examples=max(150, settings().max_examples))

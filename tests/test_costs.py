@@ -314,7 +314,7 @@ def test_every_agent_profile_is_complete_and_matches_its_listing(model):
         ("pricing", "input_cache_read", "0.0000002"),
         ("pricing", "input_cache_write", "0.000001"),
         ("pricing", "request", "0.01"),
-        ("pricing", "discount", 0),
+        ("pricing", "discount", 0.25),
         ("pricing", "discount", 2),
     ],
 )
@@ -382,6 +382,34 @@ def test_a_charge_is_read_only_from_one_verified_billing_record(response, charge
             billed_response(response, "Azure")
     else:
         assert billed_response(response, "Azure") == (charge, "generation-test")
+
+
+@pytest.mark.parametrize(
+    "usage,charge",
+    [
+        (
+            {
+                "cost": "0.0001",
+                "is_byok": True,
+                "cost_details": {"upstream_inference_cost": "0.5"},
+            },
+            Decimal("0.5001"),
+        ),
+        # OpenRouter served the request from its own capacity instead of the key.
+        ({"cost": "0.5", "is_byok": False}, None),
+        ({"cost": "0", "is_byok": True}, None),
+    ],
+)
+def test_a_byok_charge_adds_the_providers_charge_to_openrouters_fee(usage, charge):
+    response = billing(usage=usage)
+    if charge is None:
+        with pytest.raises(CostAccountingError):
+            billed_response(response, "Azure", byok=True)
+    else:
+        assert billed_response(response, "Azure", byok=True) == (
+            charge,
+            "generation-test",
+        )
 
 
 def test_preflight_checks_key_and_endpoint(monkeypatch):

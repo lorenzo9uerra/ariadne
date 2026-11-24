@@ -19,8 +19,9 @@ from benchmark.costs import (
     CostAccountingError,
     Ledger,
     Prices,
-    amount,
     billed_response,
+    byok_route,
+    full_charge,
     preflight,
     routing,
 )
@@ -227,12 +228,16 @@ class OpenRouterModel:
                 or data.get("id") != generation_id
                 or data.get("model")
                 != self.config["models"]["agent"].removeprefix("openrouter/")
-                or data.get("is_byok") is not False
                 or not isinstance(data.get("finish_reason"), str)
                 or not data["finish_reason"]
             ):
                 return
-            charge = amount(data.get("total_cost"))
+            charge = full_charge(
+                data.get("is_byok"),
+                data.get("total_cost"),
+                data.get("upstream_inference_cost"),
+                byok_route(self.config["agent_route"]),
+            )
             if data.get("provider_name") != self.config["agent_route"][
                 "provider_name"
             ] and not (data.get("provider_name") is None and charge == 0):
@@ -258,6 +263,7 @@ class OpenRouterModel:
                     "is_byok",
                     "finish_reason",
                     "total_cost",
+                    "upstream_inference_cost",
                 )
                 if key in data
             },
@@ -387,8 +393,9 @@ class OpenRouterModel:
             )
         data = response.json()
         entry.update(status="received", response=data)
+        route = self.config["agent_route"]
         charge, generation_id = billed_response(
-            data, self.config["agent_route"]["provider_name"]
+            data, route["provider_name"], byok_route(route)
         )
         self.ledger.settle(request_id, charge, generation_id)
         usage = usage_fields(data)
