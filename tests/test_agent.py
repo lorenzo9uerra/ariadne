@@ -379,6 +379,9 @@ def test_bash_preserves_streams_and_reports_timeout(tmp_path, live_mock, monkeyp
         (255, "", "", False, "shell_transport_error"),
         (255, "", "synthetic error", True, "shell_transport_error"),
         (255, "synthetic stdout diagnostic", "", True, "shell_transport_error"),
+        # A pilot attempt ended on output in the wrong format, with nothing
+        # recorded to tell why.
+        (0, "0\n0\n0\n\n\nstray\n" + "z" * 3000, "", True, "shell_transport_error"),
     ],
 )
 def test_shell_transport_failure_retains_private_diagnostics_and_stops(
@@ -417,8 +420,14 @@ def test_shell_transport_failure_retains_private_diagnostics_and_stops(
     ]
     diagnostic = next(e for e in entries if e["stage"] == "shell_transport")
     assert diagnostic["return_code"] == return_code
-    assert diagnostic["stderr"] == stderr[:2048]
-    assert diagnostic["stderr_truncated"] == (len(stderr) > 2048)
+    if diagnostic.get("error_type") == "InvalidCapture":
+        assert diagnostic["stdout_lines"] == 7
+        assert diagnostic["stdout_head"] == stdout[:1024]
+        assert diagnostic["stdout_tail"] == stdout[-1024:]
+        assert stdout[:1024] not in trajectory.model_dump_json()
+    else:
+        assert diagnostic["stderr"] == stderr[:2048]
+        assert diagnostic["stderr_truncated"] == (len(stderr) > 2048)
     assert "stderr_truncated" not in trajectory.model_dump_json()
     if stderr:
         assert stderr[:2048] not in trajectory.model_dump_json()

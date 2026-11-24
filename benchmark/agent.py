@@ -493,10 +493,22 @@ class AgentAttempt:
                 stderr=stderr[:2048],
                 stderr_truncated=len(stderr) > 2048,
             )
+        stdout = result.stdout or ""
         try:
-            return json.dumps(decode_capture(result.stdout or "", limit))
-        except (ValueError, RuntimeError):
-            self.shell_failure("shell_transport_error", error_type="InvalidCapture")
+            return json.dumps(decode_capture(stdout, limit))
+        except (ValueError, RuntimeError) as error:
+            # The start and end of the malformed output show what broke the
+            # format. Like every audit record, they stay private.
+            self.shell_failure(
+                "shell_transport_error",
+                error_type="InvalidCapture",
+                error=str(error),
+                return_code=result.return_code,
+                stdout_chars=len(stdout),
+                stdout_lines=len(stdout.splitlines()),
+                stdout_head=stdout[:1024],
+                stdout_tail=stdout[1024:][-1024:],
+            )
 
     def shell_failure(self, reason: str, **details) -> NoReturn:
         """Record why the shell's output can't be trusted, and end the attempt."""
