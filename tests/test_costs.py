@@ -297,6 +297,7 @@ def test_every_agent_profile_is_complete_and_matches_its_listing(model):
     assert route["reasoning_effort"] in ("low", "medium", "high", "xhigh", "max")
     assert 0 <= route["temperature"] <= 2
     assert route["provider"] and route["provider_name"] and route["token_encoding"]
+    assert route["generation_model"].startswith(model.split("/")[0] + "/")
     assert "limit_usd" not in config["spending"]
     check_endpoint(listing(model), config, prices)
 

@@ -107,6 +107,8 @@ disable_reasoning = true
 # Agent routes, chosen with --model. load_draft copies the chosen one into
 # config["agent_route"]. Prices and discounts verified on 2026-10-06.
 [agents."mistralai/mistral-large-4-0"]
+# The dated name OpenRouter gives this model in generation records.
+generation_model = "mistralai/mistral-large-4-0-20261006"
 provider = "mistral/zdr"
 provider_name = "Mistral"
 # Served with the owner's Mistral key through OpenRouter's BYOK, so Mistral
@@ -128,6 +130,7 @@ cached_input_per_million = "0.07"
 context_tokens = 1048576
 
 [agents."qwen/qwen3.8-flash"]
+generation_model = "qwen/qwen3.8-flash-20260826"
 provider = "alibaba"
 provider_name = "Alibaba"
 output_token_parameter = "max_tokens"
@@ -146,6 +149,7 @@ context_tokens = 1000000
 max_prompt_tokens = 983616
 
 [agents."z-ai/glm-5.3"]
+generation_model = "z-ai/glm-5.3-20260816"
 provider = "novita/fp8"
 provider_name = "Novita"
 output_token_parameter = "max_tokens"
@@ -164,6 +168,7 @@ context_tokens = 1048576
 discount = "0.5"
 
 [agents."deepseek/deepseek-v4-flash-0731"]
+generation_model = "deepseek/deepseek-v4-flash-20260731"
 provider = "deepinfra/fp8"
 provider_name = "DeepInfra"
 output_token_parameter = "max_tokens"
@@ -181,6 +186,7 @@ cached_input_per_million = "0.015"
 context_tokens = 1048576
 
 [agents."deepseek/deepseek-v4.1-flash-1017"]
+generation_model = "deepseek/deepseek-v4.1-flash-20261017"
 # Moved from DeepInfra's priority tier on 2026-11-24, so earlier runs of this
 # model are not comparable with later ones.
 provider = "mistral/fp8"
@@ -201,6 +207,7 @@ cached_input_per_million = "0.007"
 context_tokens = 1048576
 
 [agents."z-ai/glm-5.3-flash"]
+generation_model = "z-ai/glm-5.3-flash-20260826"
 provider = "novita/fp8"
 provider_name = "Novita"
 output_token_parameter = "max_tokens"
@@ -219,6 +226,7 @@ context_tokens = 1048576
 discount = "0.44"
 
 [agents."xiaomi/mimo-v2.6-pro"]
+generation_model = "xiaomi/mimo-v2.6-pro-20260921"
 provider = "xiaomi/fp8"
 provider_name = "Xiaomi"
 output_token_parameter = "max_tokens"

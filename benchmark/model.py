@@ -226,8 +226,7 @@ class OpenRouterModel:
             if (
                 not isinstance(data, dict)
                 or data.get("id") != generation_id
-                or data.get("model")
-                != self.config["models"]["agent"].removeprefix("openrouter/")
+                or data.get("model") != self.config["agent_route"]["generation_model"]
                 or not isinstance(data.get("finish_reason"), str)
                 or not data["finish_reason"]
             ):

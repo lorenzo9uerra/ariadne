@@ -283,7 +283,7 @@ def test_confirmed_error_charges_release_holds_before_retry(model_factory, monke
                 json={
                     "data": {
                         "id": f"gen-synthetic-{calls}",
-                        "model": "mistralai/mistral-large-4-0",
+                        "model": config["agent_route"]["generation_model"],
                         "provider_name": None,
                         "is_byok": agent_billing()["is_byok"],
                         "finish_reason": "error",
@@ -339,7 +339,7 @@ def test_error_lookup_requires_confirmed_matching_billing(model_factory, defect)
     billing = agent_billing("0.007")
     metadata = {
         "id": "gen-synthetic-error",
-        "model": TEST_MODEL,
+        "model": config["agent_route"]["generation_model"],
         "provider_name": config["agent_route"]["provider_name"],
         "is_byok": billing["is_byok"],
         "finish_reason": "error",
