@@ -75,7 +75,7 @@ OpenRouter passes on to the provider.
 | GLM 5.3 / Novita FP8 | `max` | 131,072 tokens |
 | GLM 5.3 Flash / Novita FP8 | `max` | 131,072 tokens |
 | DeepSeek V4 Flash / DeepInfra FP8 | `high` | 384,000 tokens |
-| DeepSeek V4.1 Flash / DeepInfra FP8 (priority) | `max` | 131,072 tokens |
+| DeepSeek V4.1 Flash / Mistral FP8 | `max` | 131,072 tokens |
 | MiMo v2.6 Pro / Xiaomi FP8 | `high` | 131,072 tokens |
 
 MiMo has a single thinking mode and a fixed temperature of 1.0. An output
