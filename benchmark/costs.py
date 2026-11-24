@@ -341,6 +341,7 @@ def preflight(config: dict, api_key: str) -> Prices:
     if not api_key:
         raise CostAccountingError("OPENROUTER_API_KEY is required")
     prices = Prices.from_config(config)
+    byok_route(config["agent_route"])
     timeout = config["requests"]["preflight_timeout_seconds"]
     check_key(read_json("/key", api_key, timeout))
     model_id = name.removeprefix("openrouter/")
@@ -350,8 +351,28 @@ def preflight(config: dict, api_key: str) -> Prices:
     return prices
 
 
-def billed_response(response: object, provider_name: str) -> tuple[Decimal, str]:
-    """Read the provider's charge from the raw HTTP response."""
+def byok_route(route: dict) -> bool:
+    """Whether the route's provider bills the owner's own key (OpenRouter BYOK)."""
+    billing = route.get("billing", "openrouter")
+    if billing not in ("openrouter", "byok"):
+        raise CostAccountingError("Unknown route billing")
+    return billing == "byok"
+
+
+def full_charge(is_byok: object, fee: object, upstream: object, byok: bool) -> Decimal:
+    """OpenRouter's fee, plus on a BYOK route the provider's charge to the
+    owner's key, which OpenRouter reports but does not bill. A record billed
+    the other way, such as OpenRouter falling back to its own capacity, is
+    refused."""
+    if is_byok is not byok:
+        raise CostAccountingError("Billing does not match the route")
+    return amount(fee) + (amount(upstream) if byok else 0)
+
+
+def billed_response(
+    response: object, provider_name: str, byok: bool = False
+) -> tuple[Decimal, str]:
+    """Read the request's full charge from the raw HTTP response."""
     if not isinstance(response, dict):
         raise CostAccountingError("Expected one raw model response")
     usage = response.get("usage")
@@ -364,6 +385,10 @@ def billed_response(response: object, provider_name: str) -> tuple[Decimal, str]
         or "cost" not in usage
     ):
         raise CostAccountingError("OpenRouter billing or provider identity is missing")
-    if usage.get("is_byok") is not False:
-        raise CostAccountingError("BYOK billing is unsupported")
-    return amount(usage["cost"]), generation_id
+    details = usage.get("cost_details")
+    upstream = (
+        details.get("upstream_inference_cost") if isinstance(details, dict) else None
+    )
+    return full_charge(
+        usage.get("is_byok"), usage["cost"], upstream, byok
+    ), generation_id
