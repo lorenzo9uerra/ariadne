@@ -79,7 +79,7 @@ pids = 128
 workspace_bytes = 268435456 # 256 MiB
 temp_bytes = 67108864 # 64 MiB
 
-# Classifier routes: [models] web_filter and [autoreview] choose among these.
+# Classifier routes: [models] web_filter and [triage] choose among these.
 # Prices verified against OpenRouter endpoint metadata on 2026-10-05.
 [triage]
 # Triage, the model part of automatic review (protocol section 10), reads each
@@ -87,7 +87,7 @@ temp_bytes = 67108864 # 64 MiB
 # windows. The web audit checks again each piece of web content the filter let
 # through, in solved attempts.
 model = "luna" # Both steps. Differs from the web filter's classifier, so the web audit does not repeat its mistakes.
-window_tokens = 100000 # Transcript per transcript review request.
+window_tokens = 100000 # Escaped transcript tokens per transcript review request.
 sample_fraction = "0.1" # Automatic decisions also sent to a human, at least one.
 
 # Classifiers, chosen by the comparison of 24 November 2026

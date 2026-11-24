@@ -420,9 +420,10 @@ async def verify_route(classifier: "Classifier", timeout: int) -> str:
         "temperature",
         "seed",
         classifier.output_parameter(),
-    } - set(settings.get("unsupported_parameters", []))
+    }
     if settings.get("disable_reasoning"):
         required.add("reasoning")
+    required.difference_update(settings.get("unsupported_parameters", []))
     if (
         amount(pricing["prompt"]) * MICRODOLLARS
         != amount(settings["input_per_million"])

@@ -107,7 +107,7 @@ def test_an_over_long_reason_is_cut_and_its_verdict_kept():
     # nearly half of one candidate's correct verdicts.
     reply = {"reason": "r" * 900, "verdict": "allow"}
     parsed = classifiers.parse_verdict(json.dumps(reply))
-    assert parsed == {"reason": "r" * classifiers.KEPT_REASON_CHARS, "verdict": "allow"}
+    assert parsed == {"reason": "r" * 256, "verdict": "allow"}
 
 
 def test_a_route_without_fixed_sampling_is_asked_without_it():
@@ -116,6 +116,17 @@ def test_a_route_without_fixed_sampling_is_asked_without_it():
     assert "temperature" not in body and body["seed"]
     assert "max_tokens" not in body
     assert body["max_completion_tokens"] == luna.budgets["filter_max_output_tokens"]
+
+
+def test_preflight_does_not_require_an_omitted_reasoning_parameter(monkeypatch):
+    candidate = classifier()
+    candidate.settings = candidate.settings | {"unsupported_parameters": ["reasoning"]}
+    data = endpoint_data()
+    data["endpoints"][0]["supported_parameters"].remove("reasoning")
+    monkeypatch.setattr(classifiers, "read_json", lambda *args: data)
+
+    assert "reasoning" not in candidate.build(message())
+    assert asyncio.run(classifiers.verify_route(candidate, 1)) == FILTER_PROVIDER
 
 
 def test_candidate_fields_must_match_stage_and_tool():
