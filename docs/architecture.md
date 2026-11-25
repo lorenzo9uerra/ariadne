@@ -147,9 +147,11 @@ uv run python -m benchmark resume logs/experiments/EXPERIMENT
 
 `summary.json` is updated when a job finishes or stops and when review decisions
 are saved. It combines Harbor's results with those decisions under the
-protocol's [scoring rules](benchmark_protocol.md#13-reporting). An experiment's
-plan, journal and summary live under `logs/experiments/`, and Harbor's jobs
-under `jobs/`, which `uv run harbor view jobs` opens.
+protocol's [scoring rules](benchmark_protocol.md#13-reporting).
+
+Open `jobs/` with `uv run harbor view jobs` to inspect individual attempts.
+For `report`, `review` and `resume`, use the corresponding experiment folder
+under `logs/experiments/`, where the plan, journal and summary are saved.
 
 ## Spending and records
 
