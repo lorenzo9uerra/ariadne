@@ -160,7 +160,10 @@ def harness(tmp_path, monkeypatch):
                 if self.end_callback is not None:
                     await self.end_callback(
                         SimpleNamespace(
-                            trial_id=trial_id, trial_name=name, config=config
+                            trial_id=trial_id,
+                            trial_name=name,
+                            config=config,
+                            result=trial,
                         )
                     )
 
@@ -253,10 +256,13 @@ def test_native_batch_checks_each_result_before_starting_another(
     plan = experiment.create_plan(
         [package], folder, settings=settings, jobs_dir=tmp_path / "jobs"
     )
+    assert not experiment.summarize(folder)["attempts"]
+    assert not (folder / "private/events.jsonl").exists()
     outcomes.extend([dict.fromkeys(METRICS, 0)] * 3)
     checked = []
 
     def check(row):
+        assert not (folder / "summary.json").exists()
         checked.append(row["slot"])
         if row["slot"] == failed_slot:
             raise RuntimeError("Synthetic infrastructure interruption")
@@ -296,9 +302,8 @@ def test_jobs_stop_only_when_trial_evidence_fails(harness, tmp_path, monkeypatch
         asyncio.run(execution)
     assert len(configs) == 1
     folder = next((tmp_path / "logs/experiments").iterdir())
-    assert len(experiment.summarize(folder)["attempts"]) == (
-        1 if case == "evidence" else 3
-    )
+    summary = json.loads((folder / "summary.json").read_text())
+    assert len(summary["attempts"]) == (1 if case == "evidence" else 3)
 
 
 def test_experiments_share_native_job_directory_without_overwriting(harness, tmp_path):

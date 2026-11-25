@@ -79,6 +79,17 @@ def write_json(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
+def read_events(folder: Path) -> list[dict]:
+    """Read the journal without creating it for an unstarted experiment."""
+    try:
+        stream = (folder / "private/events.jsonl").open(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    with stream:
+        fcntl.flock(stream, fcntl.LOCK_SH)
+        return [json.loads(line) for line in stream if line.strip()]
+
+
 @contextmanager
 def journal(folder: Path):
     """Lock the event journal; yield its events and a function that appends one."""

@@ -6,8 +6,8 @@ description = "Security challenge benchmarks with Harbor and isolated verificati
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "httpx==0.28.1",
-    "pydantic==2.13.5",
-    "harbor==0.24.0",
+    "pydantic==2.14.0",
+    "harbor==0.27.0",
     "python-dotenv==1.2.3",
     "tiktoken==0.14.0",
 ]

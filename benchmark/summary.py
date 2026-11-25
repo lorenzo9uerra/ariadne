@@ -27,7 +27,7 @@ from benchmark.decoys import (
     decoy_findings,
     plan_variant,
 )
-from benchmark.records import digest, journal, read_plan, write_json
+from benchmark.records import digest, read_events, read_plan, write_json
 
 # Review outcomes for an attempt. Counted attempts are scored; the excluded
 # ones (failures outside the agent's control) may be rerun in their slot.
@@ -169,6 +169,29 @@ def decoy_paths(findings: list[str], prefix: str) -> set[str]:
     return {f.removeprefix(prefix) for f in findings if f.startswith(prefix)}
 
 
+def result_fields(trial: TrialResult, item: dict, spending: dict | None = None) -> dict:
+    """The recorded outcome and spending for a finished Harbor trial."""
+    agent = trial.agent_result
+    metadata = (agent.metadata or {}) if agent else {}
+    if spending is None:
+        spending = metadata.get("spending", {})
+    cost = number(spending.get("billed_usd", agent.cost_usd if agent else None))
+    rewards = trial.verifier_result.rewards if trial.verifier_result else None
+    if rewards is not None:
+        validate_rewards(rewards, item["answer_type"], item["reward_weights"])
+    return {
+        "stop_reason": metadata.get("stop_reason"),
+        "exception_type": trial.exception_info.exception_type
+        if trial.exception_info
+        else None,
+        "components": rewards,
+        "raw_solve": int(is_success(rewards) and trial.exception_info is None),
+        "expected_unbilled_requests": spending.get("expected_unbilled_requests", 0),
+        "cost_usd": cost,
+        "held_usd": number(spending.get("held_usd", 0 if cost is not None else None)),
+    }
+
+
 def score_attempt(
     folder: Path,
     plan: dict,
@@ -211,30 +234,10 @@ def score_attempt(
     row["search_results"], row["reflection_results"] = search_reflections(path.parent)
     trial = TrialResult.model_validate_json(path.read_text())
     metadata = (trial.agent_result.metadata or {}) if trial.agent_result else {}
-    row["stop_reason"] = metadata.get("stop_reason")
-    row["exception_type"] = (
-        trial.exception_info.exception_type if trial.exception_info else None
-    )
-    rewards = trial.verifier_result.rewards if trial.verifier_result else None
     job = next(item for item in plan["jobs"] if item["name"] == attempt["planned_job"])
-    if rewards is not None:
-        validate_rewards(rewards, job["answer_type"], job["reward_weights"])
-    row["components"] = rewards
-    row["raw_solve"] = int(is_success(rewards) and trial.exception_info is None)
-    spending = metadata.get("spending", {})
-    if billing:
-        if billing["result_sha256"] != result["sha256"]:
-            raise ValueError("Billing correction refers to a different native result")
-        spending = billing["spending"]
-    row["expected_unbilled_requests"] = spending.get("expected_unbilled_requests", 0)
-    row["cost_usd"] = number(
-        spending.get(
-            "billed_usd", trial.agent_result.cost_usd if trial.agent_result else None
-        )
-    )
-    row["held_usd"] = number(
-        spending.get("held_usd", 0 if row["cost_usd"] is not None else None)
-    )
+    if billing and billing["result_sha256"] != result["sha256"]:
+        raise ValueError("Billing correction refers to a different native result")
+    row.update(result_fields(trial, job, billing["spending"] if billing else None))
     row["elapsed_seconds"] = number(metadata.get("elapsed_seconds"))
     execution = trial.agent_execution
     if (
@@ -533,8 +536,7 @@ def accounting(rows: list[dict], counted: list[dict]) -> dict:
 def summarize(folder: Path) -> dict:
     """The experiment's attempts, scores and spending, derived from its journal."""
     plan = read_plan(folder)
-    with journal(folder) as (events, _):
-        events = list(events)
+    events = read_events(folder)
     rows = attempt_rows(folder, plan, events)
     # A replacement fills its slot; the latest attempt in a slot is the active one.
     active = {(row["planned_job"], row["slot"]): row for row in rows}
