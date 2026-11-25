@@ -8,13 +8,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
-from urllib.request import (
-    HTTPRedirectHandler,
-    ProxyHandler,
-    Request,
-    build_opener,
-)
 from uuid import uuid4
+
+import httpx
 
 API_URL = "https://openrouter.ai/api/v1"
 MICRODOLLARS = Decimal(1_000_000)
@@ -202,21 +198,26 @@ class Ledger:
         }
 
 
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise CostAccountingError("OpenRouter preflight must not redirect")
-
-
 def read_json(path: str, api_key: str | None, timeout: int) -> dict:
     """Read only fixed OpenRouter control endpoints, without proxies or redirects."""
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    request = Request(API_URL + path, headers=headers)
+    headers = {"Accept-Encoding": "identity"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    raw = bytearray()
     try:
-        opener = build_opener(ProxyHandler({}), NoRedirect())
-        with opener.open(request, timeout=timeout) as response:
-            raw = response.read(1_048_577)
-        if len(raw) > 1_048_576:
-            raise ValueError("Response size")
+        with httpx.stream(
+            "GET",
+            API_URL + path,
+            headers=headers,
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+        ) as response:
+            response.raise_for_status()
+            for chunk in response.iter_raw(chunk_size=65536):
+                if len(raw) + len(chunk) > 1_048_576:
+                    raise ValueError("Response size")
+                raw.extend(chunk)
         result = json.loads(raw)
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError("Response schema")

@@ -352,4 +352,4 @@ def test_job_config_passes_variant_to_the_environment(tmp_path):
 
 def test_environment_rejects_unknown_variant():
     with pytest.raises(ValueError, match="plain.*decoy"):
-        AriadneDockerEnvironment(variant="other")
+        AriadneDockerEnvironment.parse_options({"variant": "other"})

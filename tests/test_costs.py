@@ -4,9 +4,11 @@ import copy
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from decimal import Decimal
 from pathlib import Path
 
+import httpx
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -32,6 +34,7 @@ from benchmark.costs import (
     check_key,
     microdollars,
     preflight,
+    read_json,
 )
 from tests.support import TEST_MODEL
 
@@ -430,3 +433,26 @@ def test_preflight_checks_key_and_endpoint(monkeypatch):
     del config["agent_route"]
     with pytest.raises(CostAccountingError):
         preflight(config, "synthetic")
+
+
+@pytest.mark.parametrize("status,padding", [(200, 0), (302, 0), (200, 1_048_576)])
+def test_preflight_transport_rejects_redirects_and_oversized_bodies(
+    monkeypatch, status, padding
+):
+    def stream(method, url, *, headers, timeout, follow_redirects, trust_env):
+        assert not follow_redirects and not trust_env
+        return nullcontext(
+            httpx.Response(
+                status,
+                headers={"Location": "https://example.invalid"},
+                stream=httpx.ByteStream(b'{"data":{"valid":true}}' + b" " * padding),
+                request=httpx.Request(method, url, headers=headers),
+            )
+        )
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    if status == 200 and not padding:
+        assert read_json("/key", "synthetic", 5) == {"valid": True}
+    else:
+        with pytest.raises(CostAccountingError, match="OpenRouter preflight failed"):
+            read_json("/key", "synthetic", 5)

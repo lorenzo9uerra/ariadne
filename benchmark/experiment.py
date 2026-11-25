@@ -35,6 +35,7 @@ from benchmark.records import (
 from benchmark.summary import (
     EXCLUDED,
     ORDINARY,
+    result_fields,
     retry_interruption,
     summarize,
     write_summary,
@@ -266,6 +267,7 @@ async def execute_job(
             replaces=replaces,
         )
     trial_error = None
+    attempts = {}
 
     async def started(event):
         if trial_error is not None:
@@ -279,28 +281,26 @@ async def execute_job(
         # Each trial takes its task's next open slot.
         assigned = open_slots[item["name"]].pop(0)
         result = event.config.trials_dir / event.trial_name / "result.json"
+        attempt = {
+            "attempt": str(event.trial_id),
+            "job": name,
+            "planned_job": item["name"],
+            "slot": assigned,
+            "path": str(result.resolve()),
+            "replaces": replaces,
+        }
         with journal(folder) as (_, append):
-            append(
-                "attempt",
-                attempt=str(event.trial_id),
-                job=name,
-                planned_job=item["name"],
-                slot=assigned,
-                path=str(result.resolve()),
-                replaces=replaces,
-            )
+            append("attempt", **attempt)
+        attempts[event.trial_id] = attempt
 
     async def ended(event):
         nonlocal trial_error
         try:
             assert on_trial_result is not None
             record_results(folder, name)
-            row = next(
-                row
-                for row in write_summary(folder)["attempts"]
-                if row["attempt"] == str(event.trial_id)
-            )
-            on_trial_result(row)
+            attempt = attempts[event.trial_id]
+            item = by_task[str(Path(event.config.task.path).resolve())]
+            on_trial_result(attempt | result_fields(event.result, item))
         except Exception as error:
             # Block the next start before it creates an environment.
             trial_error = error

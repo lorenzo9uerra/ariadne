@@ -63,21 +63,15 @@ DOCKER = pytest.mark.skipif(
 def test_sandbox_limits_must_be_the_five_positive_numbers(change):
     limits = load_draft()["sandbox"] | change
     with pytest.raises(ValueError, match="sandbox"):
-        AriadneDockerEnvironment(sandbox_limits=limits)
+        AriadneDockerEnvironment.parse_options({"sandbox_limits": limits})
 
 
-def test_sandbox_limits_reach_compose_through_the_environment(monkeypatch):
+def test_startup_uses_configured_limits_and_prepares_the_shared_image(
+    tmp_path, monkeypatch
+):
     limits = load_draft()["sandbox"] | {"memory_bytes": 3 * 2**30}
     for name in LIMIT_VARIABLES.values():
         monkeypatch.delenv(name, raising=False)
-    # The limits are set before Harbor's own setup, which needs a real task.
-    with pytest.raises(TypeError):
-        AriadneDockerEnvironment(sandbox_limits=limits)
-    assert os.environ["ARIADNE_MEMORY_BYTES"] == str(3 * 2**30)
-    assert os.environ["ARIADNE_CPUS"] == str(limits["cpus"])
-
-
-def test_shared_image_is_prepared_during_startup(tmp_path, monkeypatch):
     task = export_review_task(
         review_package(tmp_path / "package"),
         tmp_path / "task",
@@ -98,7 +92,10 @@ def test_shared_image_is_prepared_during_startup(tmp_path, monkeypatch):
         trial_paths=TrialPaths(trial_dir=tmp_path / "trial"),
         task_env_config=Task(task).config.environment,
         network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK),
+        sandbox_limits=limits,
     )
+    for key, name in LIMIT_VARIABLES.items():
+        assert os.environ[name] == str(limits[key])
     build.assert_not_called()
     with pytest.raises(RuntimeError, match="Synthetic build failed"):
         asyncio.run(environment.start(force_build=False))

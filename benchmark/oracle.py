@@ -25,12 +25,9 @@ RUN_COMMAND = "(/solution/solve.sh) > /logs/agent/oracle.txt 2>&1"
 
 def translate_oracle_command(command: str) -> tuple[str, str | None] | None:
     """Rewrite only Harbor's exact Oracle commands. Leave every other command unchanged."""
-    if command in (CHMOD_COMMAND, "chmod +x '/solution/solve.sh'"):
+    if command == CHMOD_COMMAND:
         return f"chmod +x {ORACLE_DIR}/{ENTRYPOINT}", "1000:1000"
-    if command in (
-        RUN_COMMAND,
-        "('/solution/solve.sh') > '/logs/agent/oracle.txt' 2>&1",
-    ):
+    if command == RUN_COMMAND:
         return (
             f"({ORACLE_DIR}/{ENTRYPOINT}) > /logs/agent/oracle.txt 2>&1",
             None,
