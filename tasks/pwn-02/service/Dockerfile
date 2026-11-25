@@ -17,8 +17,13 @@ RUN dpkg-deb -x /tmp/ca-certificates.deb /tmp/ca \
     && rm -rf /tmp/ca /tmp/ca-certificates.deb \
     && rm -f /etc/apt/sources.list.d/* \
     && printf 'deb [check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/ focal main\ndeb [check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/ focal-updates main\ndeb [check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/ focal-security main\n' > /etc/apt/sources.list \
-    && apt-get -o APT::Update::Error-Mode=any update \
-    && apt-get install -y --no-install-recommends \
+    && retry() { "$@" || { sleep 5; "$@"; } || { sleep 15; "$@"; }; } \
+    && install_from_snapshot() { \
+        retry apt-get install --download-only -y --no-install-recommends "$@" \
+        && apt-get install --no-download -y --no-install-recommends "$@"; \
+    } \
+    && retry apt-get -o APT::Update::Error-Mode=any update \
+    && install_from_snapshot \
         ca-certificates=20240203~20.04.1 \
         build-essential=12.8ubuntu1.1 \
         autoconf=2.69-11.1 \
@@ -71,8 +76,13 @@ RUN dpkg-deb -x /tmp/ca-certificates.deb /tmp/ca \
     && rm -rf /tmp/ca /tmp/ca-certificates.deb \
     && rm -f /etc/apt/sources.list.d/* \
     && printf 'deb [check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/ focal main\ndeb [check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/ focal-updates main\ndeb [check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/ focal-security main\n' > /etc/apt/sources.list \
-    && apt-get -o APT::Update::Error-Mode=any update \
-    && apt-get install -y --no-install-recommends \
+    && retry() { "$@" || { sleep 5; "$@"; } || { sleep 15; "$@"; }; } \
+    && install_from_snapshot() { \
+        retry apt-get install --download-only -y --no-install-recommends "$@" \
+        && apt-get install --no-download -y --no-install-recommends "$@"; \
+    } \
+    && retry apt-get -o APT::Update::Error-Mode=any update \
+    && install_from_snapshot \
         ca-certificates=20240203~20.04.1 \
         python3=3.8.2-0ubuntu2 \
         socat=1.7.3.3-2 \
