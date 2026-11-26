@@ -17,6 +17,7 @@ the machine holding your credentials and records.
   qualify.
 - **SSH** with key authentication, and an account with sudo.
 - **Capacity:** at least 2 vCPUs, 4 GiB of memory and 40 GB of disk.
+- **Evaluation host:** the Docker client with the Compose and Buildx plugins.
 - **Network:** inbound SSH from the evaluation host only. Outbound access is
   needed only for setup and image builds. The model and search APIs are called
   from the evaluation host, so outbound traffic can be blocked during runs.
