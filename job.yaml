@@ -7,3 +7,7 @@ environment:
   import_path: sandbox.environment:AriadneDockerEnvironment
 agents:
   - import_path: benchmark.agent:AriadneAgent
+# The captured submission reaches the separate verifier through this folder.
+# Harbor plans to stop collecting it unless it is declared.
+artifacts:
+  - /logs/artifacts
