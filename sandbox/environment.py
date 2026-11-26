@@ -191,6 +191,14 @@ class AriadneDockerEnvironment(DockerEnvironment):
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await DockerEnvironment._terminate_process(process)
+            # Discard the unread output so the pipe closes now. Left open, it
+            # closes only when garbage collected, after its event loop may be gone.
+            try:
+                async with asyncio.timeout(5):
+                    while await stream.read(65536):
+                        pass
+            except Exception:
+                pass
             if isinstance(error, TimeoutError):
                 raise RuntimeError(
                     f"Command timed out after {timeout_sec} seconds"

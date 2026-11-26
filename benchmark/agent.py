@@ -234,6 +234,17 @@ class AriadneAgent(BaseAgent):
     def version(self) -> str:
         return package_version("ariadne")
 
+    async def set_web_tools_disabled(
+        self, disabled: bool, environment: BaseEnvironment
+    ) -> None:
+        """Keep the filtered web tools that the protocol gives every task.
+
+        Harbor asks agents to turn off their own web tools when the task's
+        network is not public, and logs an error when they have none. Ariadne's
+        search and fetch run on the evaluation host through the web filter, and
+        the sandbox stays offline either way.
+        """
+
     async def setup(self, environment: BaseEnvironment) -> None:
         """Connect the model and filtered web access; check both routes first."""
         if not isinstance(environment, AriadneDockerEnvironment):

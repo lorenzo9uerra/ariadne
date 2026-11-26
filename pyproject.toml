@@ -42,6 +42,11 @@ packages = ["benchmark", "sandbox"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Harbor's own trial code reads its deprecated Task.checksum. The filter is
+# limited to that module, so a use in Ariadne's code still warns.
+filterwarnings = [
+    "ignore:Task.checksum will be deprecated:DeprecationWarning:harbor.trial.trial",
+]
 
 [tool.ruff]
 target-version = "py312"
