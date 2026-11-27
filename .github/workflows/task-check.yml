@@ -1,0 +1,120 @@
+name: Task check
+
+# An agent reads each task a pull request adds or changes and grades it against
+# benchmark/task_rubric.toml with `harbor check`. The grades come from a model and
+# vary between runs, so keep this job out of the required checks. The repository
+# is public and the grader's explanations quote private task files, so the log
+# and the job summary show only each criterion's verdict. Run the same command
+# locally to read the explanations:
+#
+#   uv run harbor check tasks -r benchmark/task_rubric.toml \
+#     -a terminus-2 -m openrouter/deepseek/deepseek-v4.1-flash -i <task>
+on:
+  pull_request:
+    paths:
+      - "tasks/**"
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: "Task folders to check, separated by spaces"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: task-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # A key of its own, with a credit limit set on OpenRouter, so these calls
+      # stay apart from the benchmark's spending ledger and cannot exceed the cap.
+      OPENROUTER_API_KEY: ${{ secrets.TASK_CHECK_OPENROUTER_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Find the tasks to check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          REQUESTED: ${{ inputs.tasks }}
+        run: |
+          if [ -n "$BASE" ]; then
+            names=$(git diff --name-only "$BASE" HEAD -- tasks/ | cut -d/ -f2)
+          else
+            names=$(printf '%s\n' $REQUESTED)
+          fi
+          # Deleted tasks have nothing to check; other names never reach a command.
+          printf '%s\n' $names | sort -u | while read -r name; do
+            if printf '%s' "$name" | grep -Eq '^[a-z0-9][a-z0-9-]*$' \
+              && [ -f "tasks/$name/task.toml" ]; then
+              echo "$name"
+            fi
+          done > "$RUNNER_TEMP/tasks.txt"
+          echo "Tasks: $(tr '\n' ' ' < "$RUNNER_TEMP/tasks.txt")"
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.23"
+          enable-cache: false
+      - name: Install Python and dependencies
+        run: |
+          uv python install
+          uv sync --locked
+      - name: Check the tasks
+        run: |
+          if [ ! -s "$RUNNER_TEMP/tasks.txt" ]; then
+            echo "No task to check" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::Add the TASK_CHECK_OPENROUTER_KEY repository secret"
+            exit 1
+          fi
+          filters=$(sed 's/^/-i /' "$RUNNER_TEMP/tasks.txt")
+          # The output can quote task files, so it stays in a file.
+          status=0
+          uv run --no-sync harbor check tasks -r benchmark/task_rubric.toml \
+            -a terminus-2 -m openrouter/deepseek/deepseek-v4.1-flash \
+            -o "$RUNNER_TEMP/task-check" --job-name check --quiet \
+            $filters > "$RUNNER_TEMP/check.log" 2>&1 || status=$?
+          report="$RUNNER_TEMP/task-check/check/check_report.json"
+          if [ ! -f "$report" ]; then
+            # Harbor stopped before any agent ran, so its output holds no task
+            # content and explains the failure.
+            tail -n 20 "$RUNNER_TEMP/check.log"
+            exit 1
+          fi
+          uv run --no-sync python - "$report" <<'EOF'
+          import json
+          import os
+          import sys
+
+          report = json.load(open(sys.argv[1]))
+          lines, failed = [], False
+          for result in report["results"]:
+              lines.append(f"### {result['task_name']}\n")
+              if result["error"]:
+                  # The error can quote the grader's output, so it stays hidden.
+                  lines.append("The check did not finish; run it locally.\n")
+                  failed = True
+                  continue
+              lines += ["| Criterion | Verdict |", "| --- | --- |"]
+              for name, check in result["checks"].items():
+                  verdict = check["outcome"].replace("_", " ")
+                  failed |= verdict == "fail"
+                  lines.append(f"| {name} | {verdict} |")
+              lines.append("")
+          cost = sum(r["cost_usd"] or 0 for r in report["results"])
+          lines.append(f"Cost: ${cost:.4f}")
+          text = "\n".join(lines) + "\n"
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(text)
+          sys.exit(1 if failed else 0)
+          EOF
