@@ -26,14 +26,19 @@ concurrency:
   group: task-check-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # An explicit bash adds pipefail, so a failed command in a pipe stops the step.
+    shell: bash
+
 jobs:
   check:
+    # Pull requests from forks get no secrets, so they are not checked.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    env:
-      # A key of its own, with a credit limit set on OpenRouter, so these calls
-      # stay apart from the benchmark's spending ledger and cannot exceed the cap.
-      OPENROUTER_API_KEY: ${{ secrets.TASK_CHECK_OPENROUTER_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,17 +50,55 @@ jobs:
           REQUESTED: ${{ inputs.tasks }}
         run: |
           if [ -n "$BASE" ]; then
-            names=$(git diff --name-only "$BASE" HEAD -- tasks/ | cut -d/ -f2)
+            # Both sides of a moved file count, and a failed diff stops the step.
+            git diff -z --no-renames --name-only "$BASE" HEAD -- tasks/ \
+              > "$RUNNER_TEMP/changed"
           else
-            names=$(printf '%s\n' $REQUESTED)
+            : > "$RUNNER_TEMP/changed"
           fi
-          # Deleted tasks have nothing to check; other names never reach a command.
-          printf '%s\n' $names | sort -u | while read -r name; do
-            if printf '%s' "$name" | grep -Eq '^[a-z0-9][a-z0-9-]*$' \
-              && [ -f "tasks/$name/task.toml" ]; then
-              echo "$name"
+          # The folder under tasks/ of every changed file, one per line; a name
+          # holding a newline then fails the check below.
+          python3 - "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/folders" <<'EOF'
+          import sys
+
+          paths = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          for path in paths.split("\0"):
+              if path.count("/") >= 2:
+                  print(path.split("/")[1])
+          EOF
+          if [ -z "$BASE" ]; then
+            # Split on spaces only, so a pattern stays a literal name.
+            read -ra requested <<< "$REQUESTED"
+            printf '%s\n' "${requested[@]}" > "$RUNNER_TEMP/folders"
+          fi
+          sort -u "$RUNNER_TEMP/folders" > "$RUNNER_TEMP/names"
+          : > "$RUNNER_TEMP/tasks.txt"
+          while IFS= read -r name; do
+            if ! [[ $name =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+              # The name itself is not printed; it may hold workflow commands.
+              echo "::error::A changed or requested folder under tasks/ has an unsupported name"
+              exit 1
             fi
-          done > "$RUNNER_TEMP/tasks.txt"
+            if [ ! -f "tasks/$name/task.toml" ]; then
+              if [ -z "$BASE" ]; then
+                echo "::error::No task named $name"
+                exit 1
+              fi
+              continue # Deleted by this pull request.
+            fi
+            if [ -n "$(find "tasks/$name" -type l -print -quit)" ]; then
+              # A link could make the grader read a file outside the task.
+              echo "::error::tasks/$name contains a symbolic link"
+              exit 1
+            fi
+            echo "$name" >> "$RUNNER_TEMP/tasks.txt"
+          done < "$RUNNER_TEMP/names"
+          # Harbor reviews every task in the folder it is given, so it gets a
+          # copy holding only the selected ones.
+          mkdir "$RUNNER_TEMP/review"
+          while IFS= read -r name; do
+            cp -R "tasks/$name" "$RUNNER_TEMP/review/$name"
+          done < "$RUNNER_TEMP/tasks.txt"
           echo "Tasks: $(tr '\n' ' ' < "$RUNNER_TEMP/tasks.txt")"
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -67,51 +110,70 @@ jobs:
           uv python install
           uv sync --locked
       - name: Check the tasks
+        env:
+          # A key of its own, with a credit limit set on OpenRouter, so these
+          # calls stay apart from the benchmark's spending ledger. Only this step
+          # receives it.
+          OPENROUTER_API_KEY: ${{ secrets.TASK_CHECK_OPENROUTER_KEY }}
         run: |
           if [ ! -s "$RUNNER_TEMP/tasks.txt" ]; then
-            echo "No task to check" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           if [ -z "$OPENROUTER_API_KEY" ]; then
             echo "::error::Add the TASK_CHECK_OPENROUTER_KEY repository secret"
             exit 1
           fi
-          filters=$(sed 's/^/-i /' "$RUNNER_TEMP/tasks.txt")
-          # The output can quote task files, so it stays in a file.
+          # The output can quote task files, so it stays in a file on the runner.
           status=0
-          uv run --no-sync harbor check tasks -r benchmark/task_rubric.toml \
+          uv run --no-sync harbor check "$RUNNER_TEMP/review" \
+            -r benchmark/task_rubric.toml \
             -a terminus-2 -m openrouter/deepseek/deepseek-v4.1-flash \
             -o "$RUNNER_TEMP/task-check" --job-name check --quiet \
-            $filters > "$RUNNER_TEMP/check.log" 2>&1 || status=$?
-          report="$RUNNER_TEMP/task-check/check/check_report.json"
-          if [ ! -f "$report" ]; then
-            # Harbor stopped before any agent ran, so its output holds no task
-            # content and explains the failure.
-            tail -n 20 "$RUNNER_TEMP/check.log"
-            exit 1
+            > "$RUNNER_TEMP/check.log" 2>&1 || status=$?
+          echo "$status" > "$RUNNER_TEMP/status"
+      - name: Report the verdicts
+        run: |
+          if [ ! -s "$RUNNER_TEMP/tasks.txt" ]; then
+            echo "No task to check" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
-          uv run --no-sync python - "$report" <<'EOF'
+          uv run --no-sync python - "$RUNNER_TEMP" <<'EOF'
           import json
           import os
           import sys
+          from pathlib import Path
 
-          report = json.load(open(sys.argv[1]))
-          lines, failed = [], False
-          for result in report["results"]:
-              lines.append(f"### {result['task_name']}\n")
-              if result["error"]:
-                  # The error can quote the grader's output, so it stays hidden.
+          folder = Path(sys.argv[1])
+          expected = folder.joinpath("tasks.txt").read_text().split()
+          status = int(folder.joinpath("status").read_text())
+          report = folder / "task-check/check/check_report.json"
+          # Only verdicts, validated task names and counts are printed: the
+          # explanations and errors can quote private task files.
+          lines, failed = [], status != 0
+          if status != 0:
+              lines.append(f"`harbor check` exited with status {status}.\n")
+          results = json.loads(report.read_text())["results"] if report.exists() else []
+          by_name = {result["task_name"]: result for result in results}
+          for name in expected:
+              lines.append(f"### {name}\n")
+              result = by_name.get(name)
+              if result is None or result["error"]:
                   lines.append("The check did not finish; run it locally.\n")
                   failed = True
                   continue
               lines += ["| Criterion | Verdict |", "| --- | --- |"]
-              for name, check in result["checks"].items():
-                  verdict = check["outcome"].replace("_", " ")
-                  failed |= verdict == "fail"
-                  lines.append(f"| {name} | {verdict} |")
+              for criterion, check in result["checks"].items():
+                  failed |= check["outcome"] == "fail"
+                  lines.append(f"| {criterion} | {check['outcome'].replace('_', ' ')} |")
               lines.append("")
-          cost = sum(r["cost_usd"] or 0 for r in report["results"])
-          lines.append(f"Cost: ${cost:.4f}")
+          if set(by_name) - set(expected):
+              lines.append("The report holds tasks that were not selected.\n")
+              failed = True
+          known = [r["cost_usd"] for r in results if r["cost_usd"] is not None]
+          cost = f"${sum(known):.4f}"
+          if len(known) < len(expected):
+              cost = f"at least {cost}, some attempts reported no cost"
+          lines.append(f"Cost: {cost}")
           text = "\n".join(lines) + "\n"
           print(text)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
