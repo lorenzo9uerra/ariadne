@@ -255,9 +255,9 @@ jobs:
           ansi = re.compile(
               r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])"
           )
-          # Left-to-right and right-to-left marks and isolates, which can
-          # visually reorder text.
-          bidi = {chr(c) for c in (0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A))}
+          # Bidi marks, overrides and isolates (including the Arabic letter
+          # mark U+061C), which can visually reorder text.
+          bidi = {chr(c) for c in (0x061C, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A))}
           log_parts, summary_parts = [], []
           budget = [job_limit]
           failed = False
