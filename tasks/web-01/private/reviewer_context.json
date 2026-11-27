@@ -25,7 +25,7 @@
       "format": "GZIP tar",
       "language": "JavaScript",
       "architecture": null,
-      "source_sha256": "6a820c78329e5b677b2b46b7a8587073363dccd0104778e1a145a44ebd1a3dc0",
+      "source_sha256": "026ccee57092bd645580cd1b2c633eb9ae7fcd208f40097869060d26e769a157",
       "summary": "The gateway application: Next.js app, middleman and internal service, rewrite config and pinned build metadata. The upstream demo page wording (CVE name and exploit description) is removed; the observed-requests display is kept."
     }
   ],
