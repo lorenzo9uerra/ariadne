@@ -686,8 +686,9 @@ def review(
     write_summary(folder)
 
 
-async def autoreview_experiment(folder: Path, *, retry_failed=False) -> None:
-    """Paid: triage's calls are charged to the shared ledger."""
+async def autoreview_experiment(folder: Path, *, retry_failed=False) -> int:
+    """Paid: triage's calls are charged to the shared ledger. Returns how many
+    attempts it reviewed."""
     load_dotenv(ROOT / ".env", override=False)
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -695,8 +696,4 @@ async def autoreview_experiment(folder: Path, *, retry_failed=False) -> None:
     settings = read_plan(folder)["settings"]
     ledger = Ledger(ROOT / SPEND_LEDGER, settings["spending"].get("limit_usd"))
     records = await run_autoreview(folder, key, ledger, retry_failed=retry_failed)
-    flagged = write_summary(folder)["automatic_review"]["flagged_for_human"]
-    print(
-        f"Automatically reviewed {len(records)} attempts; "
-        f"{len(flagged)} need a human decision."
-    )
+    return len(records)
