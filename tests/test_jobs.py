@@ -100,6 +100,7 @@ def test_job_template_uses_native_schema():
     assert config.n_concurrent_trials == 1
     assert config.n_attempts == 3
     assert config.retry.max_retries == 0
+    assert config.artifacts == ["/logs/artifacts"]
     assert config.agents[0].import_path == "benchmark.agent:AriadneAgent"
     assert (
         config.environment.import_path == "sandbox.environment:AriadneDockerEnvironment"
