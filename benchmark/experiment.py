@@ -20,8 +20,6 @@ from harbor.models.job.config import JobConfig
 from harbor.models.trial.result import TrialResult
 from harbor.utils.logger import logger as harbor_logger
 from rich import get_console
-from rich.padding import Padding
-from rich.table import Table
 from rich.text import Text
 
 from benchmark.answers import is_success, reward_weights
@@ -68,9 +66,16 @@ ENDINGS = {
 }
 
 
-def show(*parts, style: str | None = None) -> None:
+def show(*parts, style: str | None = None, wrap: bool = False) -> None:
     """Print above Harbor's progress display, which then redraws in place."""
-    get_console().print(*parts, style=style, highlight=False, soft_wrap=True)
+    console = get_console()
+    console.print(
+        *parts,
+        style=style,
+        markup=False,
+        highlight=False,
+        soft_wrap=not (wrap and console.is_terminal),
+    )
 
 
 def duration(seconds: float) -> str:
@@ -98,17 +103,10 @@ LABEL_WIDTH = 10
 
 
 def show_fields(title: str | None, rows: list[tuple[str, str]]) -> None:
-    """A bold title over labelled rows, the layout of the start and end screens."""
-    table = Table.grid(padding=(0, 2))
-    # One label width keeps the values of separate groups in one column.
-    table.add_column(style="dim", min_width=LABEL_WIDTH)
-    # Fold long paths and commands rather than cut them short.
-    table.add_column(overflow="fold")
-    for row in rows:
-        table.add_row(*row)
     if title:
         show(Text(title, "bold"))
-    show(Padding(table, (0, 0, 0, 2), expand=False))
+    for label, value in rows:
+        show(Text.assemble((f"  {label:<{LABEL_WIDTH}}  ", "dim"), value))
 
 
 def plan_title(plan: dict) -> str:
@@ -123,9 +121,10 @@ def plan_fields(plan: dict) -> list[tuple[str, str]]:
     """The model, the tasks and any variant, for the start and end screens."""
     attempts = {item["attempts"] for item in plan["jobs"]}
     if len(attempts) == 1:
-        tasks = f"{len(plan['jobs'])} x {count(attempts.pop(), 'attempt')}"
+        total = f"{count(attempts.pop(), 'attempt')} each"
     else:
-        tasks = f"{len(plan['jobs'])}, {count(plan_size(plan), 'attempt')}"
+        total = f"{count(plan_size(plan), 'attempt')} total"
+    tasks = f"{len(plan['jobs'])} ({total})"
     rows = [("Model", plan["settings"]["models"]["agent"]), ("Tasks", tasks)]
     variant = plan_variant(plan["settings"])
     if variant != "plain":
@@ -133,10 +132,16 @@ def plan_fields(plan: dict) -> list[tuple[str, str]]:
     return rows
 
 
-# Column headings over the attempt lines, aligned with attempt_line.
-ATTEMPT_COLUMNS = (
-    f"  {'Task':<12}{'Attempt':<9}{'Result':<12}{'Time':>7}  {'Left':>8}  Notes"
-)
+ATTEMPT_WIDTH = 15
+ATTEMPT_COLUMNS = f"  {'Result':<12}  {'Time':>7}  {'Time left':>9}  {'Attempt':<{ATTEMPT_WIDTH}}  Notes"
+
+
+def show_attempt_header() -> None:
+    console = get_console()
+    header = ATTEMPT_COLUMNS
+    if console.is_terminal and len(header) > console.width:
+        header = header.removesuffix("Notes").rstrip()
+    show(f"{header}\n  {'-' * (len(header) - 2)}", style="dim")
 
 
 def attempt_line(row: dict, remaining: float | None = None) -> Text:
@@ -150,13 +155,21 @@ def attempt_line(row: dict, remaining: float | None = None) -> Text:
     else:
         outcome, style = "unsolved", "bold red"
     elapsed = row.get("elapsed_seconds")
+    elapsed_text = duration(elapsed) if elapsed is not None else "-"
+    eta = duration(remaining) if remaining is not None else "-"
     line = Text.assemble(
-        f"  {row['planned_job']:<12}{row['slot']:<9}",
-        (f"{outcome:<12}", style),
-        (duration(elapsed) if elapsed is not None else "?").rjust(7),
-        # The whole run's estimated time left, before the notes, whose length varies.
-        ((duration(remaining) if remaining else "").rjust(10), "dim"),
+        (f"  {outcome:<12}", style),
+        f"  {elapsed_text:>7}",
+        (f"  {eta:>9}", "dim"),
     )
+    attempt = Text(f"{row['planned_job']} #{row['slot']}")
+    console = get_console()
+    width = console.width if console.is_terminal else None
+    if width is not None and line.cell_len + 2 + attempt.cell_len > width:
+        line.append("\n    ")
+    else:
+        line.append("  ")
+    line.append(attempt)
     notes = []
     reward = (row.get("components") or {}).get("reward") or 0
     if outcome == "unsolved" and reward:
@@ -170,15 +183,27 @@ def attempt_line(row: dict, remaining: float | None = None) -> Text:
         notes.append(ENDINGS.get(row["stop_reason"], row["stop_reason"]))
     if row["cost_usd"] is None or row["held_usd"] != 0:
         notes.append("bill pending")
-    if interrupted or retry:
-        notes.append(Text(f"review {row['attempt']}", "yellow"))
     if notes:
-        line.append("  ")
-        line.append(
-            Text(", ").join(
-                Text(note) if isinstance(note, str) else note for note in notes
-            )
-        )
+        detail = Text(", ".join(notes))
+        gap = max(0, ATTEMPT_WIDTH - attempt.cell_len) + 2
+        if width is not None and (
+            attempt.cell_len > ATTEMPT_WIDTH
+            or line.cell_len + gap + detail.cell_len > width
+        ):
+            line.append("\n    ")
+        else:
+            line.append(" " * gap)
+        line.append(detail)
+    if interrupted or retry:
+        review = Text(f"review {row['attempt']}", "yellow")
+        if (
+            width is not None
+            and line.split()[-1].cell_len + 2 + review.cell_len > width
+        ):
+            line.append("\n    ")
+        else:
+            line.append(", ")
+        line.append(review)
     return line
 
 
@@ -604,7 +629,7 @@ def check_result(row: dict | None, remaining: float | None = None) -> None:
     if row is None:
         raise RuntimeError("No attempt was recorded for the finished trial")
     isolation_evidence(Path(row["path"]).parent)
-    show(attempt_line(row, remaining))
+    show(attempt_line(row, remaining), wrap=True)
 
 
 def unfinished_jobs(events: list[dict]) -> bool:
@@ -641,7 +666,7 @@ async def resume_experiment(folder: Path, task=None) -> None:
             fields = [*plan_fields(plan), ("Folder", shown_path(folder))]
             show_fields(f"{plan_title(plan)} (resumed)", fields)
             show()
-            show(ATTEMPT_COLUMNS, style="dim")
+            show_attempt_header()
             started = True
         for slot, previous in slots:
             if previous is None:
@@ -698,7 +723,7 @@ async def run_experiment(
     )
     show_fields(plan_title(plan), [*plan_fields(plan), ("Folder", shown_path(folder))])
     show()
-    show(ATTEMPT_COLUMNS, style="dim")
+    show_attempt_header()
     try:
         await execute_job(folder, plan, plan["jobs"], on_trial_result=check_result)
     finally:

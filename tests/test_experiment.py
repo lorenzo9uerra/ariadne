@@ -5,6 +5,7 @@ import fcntl
 import json
 import math
 import os
+import shlex
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -1285,6 +1286,46 @@ def test_cli_refuses_a_docker_host_that_cannot_run_the_task(
     # Nothing ran and no experiment folder was created.
     assert not started
     assert not (tmp_path / "logs").exists()
+
+
+def test_suggested_resume_command_preserves_the_path_and_context(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOCKER_CONTEXT", "remote-vm")
+    folder = tmp_path.resolve() / "experiment [draft] {2}"
+    summary = {"automatic_review": {"flagged_for_human": [], "backend_failed": []}}
+    (command,) = cli.next_step(folder, summary, [], 3)
+    assert shlex.split(command)[5:] == [
+        "resume",
+        folder.name,
+        "--docker-context",
+        "remote-vm",
+    ]
+
+
+def test_status_paths_and_errors_print_brackets_literally(capsys):
+    path = "experiments/[draft] [/]"
+    experiment.show_fields(None, [("Folder", path)])
+    with pytest.raises(SystemExit) as stopped:
+        cli.stop(None, f"Error: could not open {path}", 1)
+    out, err = capsys.readouterr()
+    assert path in out and path in err
+    assert stopped.value.code == 1
+
+
+def test_attempt_notes_align_across_task_names(capsys):
+    experiment.show_attempt_header()
+    row = {
+        "exception_type": None,
+        "stop_reason": "elapsed_seconds",
+        "raw_solve": 0,
+        "slot": 1,
+        "cost_usd": 0.01,
+        "held_usd": 0,
+    }
+    for name in ("short", "longer-task"):
+        experiment.show(experiment.attempt_line(row | {"planned_job": name}))
+    header, _, *attempts = capsys.readouterr().out.splitlines()
+    assert {line.index("time limit") for line in attempts} == {header.index("Notes")}
 
 
 @pytest.mark.parametrize("model", ["mistralai/mistral-large-4-0", "qwen/qwen3.8-flash"])

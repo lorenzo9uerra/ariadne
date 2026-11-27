@@ -5,6 +5,7 @@ experiments, their reviews and reports, and checking a finished job's evidence.
 import argparse
 import asyncio
 import os
+import shlex
 from pathlib import Path
 
 from rich.console import Console
@@ -57,7 +58,17 @@ def planned_packages(folder: Path) -> list[Package]:
 def next_step(folder: Path, summary: dict, rows: list[dict], planned: int) -> list[str]:
     """What to do next for the active attempts, in the order the review
     checklist sets."""
-    command = f"uv run python -m benchmark {{}} {shown_path(folder)}"
+    path = shown_path(folder)
+    if path.startswith("-"):
+        path = f"./{path}"
+
+    def command(action: str, *options: str) -> list[str]:
+        return [
+            shlex.join(
+                ["uv", "run", "python", "-m", "benchmark", action, path, *options]
+            )
+        ]
+
     decision = [(row["review"] or {}).get("disposition") for row in rows]
     waiting = [r for r, d in zip(rows, decision) if d in (None, "pending")]
     automatic = summary["automatic_review"]
@@ -74,27 +85,34 @@ def next_step(folder: Path, summary: dict, rows: list[dict], planned: int) -> li
         if row["attempt"] in automatic["backend_failed"] and row not in by_hand
     ]
     if len(waiting) > len(by_hand) + len(retry):
-        return [command.format("autoreview")]
+        return command("autoreview")
     if retry:
-        return [command.format("autoreview") + " --retry-failed"]
+        return command("autoreview", "--retry-failed")
     if by_hand:
         return [
             "review by hand (docs/review_checklist.md)",
             *(f"  {r['planned_job']} #{r['slot']}  {r['attempt']}" for r in by_hand),
         ]
     if len(rows) < planned or any(d in EXCLUDED for d in decision):
-        return [command.format("resume")]
+        context = os.environ.get("DOCKER_CONTEXT")
+        return (
+            command("resume", "--docker-context", context)
+            if context
+            else command("resume")
+        )
     return []
 
 
 def score_table(summary: dict) -> Table:
     """Clean and raw scores side by side, pass@1 split by category once reviewed.
     Clean scores show as a dash until every attempt is reviewed."""
+    complete = summary["complete"]
     table = Table(box=None, padding=(0, 2), pad_edge=False, collapse_padding=True)
     table.add_column("Score", style="dim", header_style="dim", min_width=LABEL_WIDTH)
     table.add_column("Clean", justify="right", header_style="dim")
-    table.add_column("Raw", justify="right", header_style="dim")
-    complete = summary["complete"]
+    table.add_column(
+        "Raw" if complete else "Raw (provisional)", justify="right", header_style="dim"
+    )
     scores = summary["scores"] if complete else summary["provisional_raw_scores"]
     categories = summary["category_scores"] if complete else {}
     for label, metric in (("Pass@1", "pass_at_1"), ("Any solve", "any_success")):
@@ -128,7 +146,7 @@ def show_summary(
         (row["review"] or {}).get("disposition") not in (None, "pending")
         for row in rows
     )
-    progress = ("Reviewed", f"{reviewed}/{len(rows)}")
+    progress = ("Reviewed", f"{reviewed}/{len(rows)} recorded" if rows else "-")
     if done and not summary["complete"]:
         show_fields(None, [done, progress, *links])
         return
@@ -148,9 +166,10 @@ def show_summary(
     if interrupted:
         finished_text += f", {interrupted} interrupted"
     fields.append(("Finished", finished_text))
-    fields.append(
-        ("Solved", f"{sum(row['raw_solve'] for row in finished)}/{len(finished)}")
-    )
+    if finished:
+        fields.append(
+            ("Solved", f"{sum(row['raw_solve'] for row in finished)}/{len(finished)}")
+        )
     if elapsed:
         fields.append(("Agent time", duration(elapsed)))
     billed = f"${summary['retained_billed_usd']:.2f}"
@@ -173,7 +192,7 @@ def stop(folder: Path | None, message: str, code: int) -> None:
     experiment stands and how to continue."""
     errors = Console(stderr=True)
     errors.print()
-    errors.print(message, style="red", highlight=False, soft_wrap=True)
+    errors.print(message, style="red", markup=False, highlight=False, soft_wrap=True)
     if folder is not None:
         try:
             summary = write_summary(folder)
