@@ -63,7 +63,7 @@ def harness(tmp_path, monkeypatch):
     monkeypatch.setattr(records, "ROOT", root)
     monkeypatch.setattr(experiment, "reviewer_context", lambda package: {})
     # These fixtures test accounting; environment checks are tested separately.
-    monkeypatch.setattr(experiment, "check_result", lambda row: None)
+    monkeypatch.setattr(experiment, "check_result", lambda row, **_: None)
     package = synthetic_package(root / "task")
     package.manifest.update(category="juliet")
     outcomes, configs = [], []
@@ -261,7 +261,7 @@ def test_native_batch_checks_each_result_before_starting_another(
     outcomes.extend([dict.fromkeys(METRICS, 0)] * 3)
     checked = []
 
-    def check(row):
+    def check(row, **_):
         assert not (folder / "summary.json").exists()
         checked.append(row["slot"])
         if row["slot"] == failed_slot:
@@ -1589,6 +1589,9 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
                 )
             row = {
                 "attempt": f"synthetic-{assigned}",
+                "planned_job": "task",
+                "slot": assigned,
+                "raw_solve": 1,
                 "path": str(trial / "result.json"),
                 "exception_type": None,
                 "stop_reason": "submitted",
@@ -1609,9 +1612,7 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     # One native job for the open slots: the rest after a partial run, or all three.
     expected_calls = [[2, 3]] if partial else [[1, 2, 3]]
     assert calls == expected_calls
-    assert capsys.readouterr().out.count("Billing pending for attempt") == (
-        2 if partial else 3
-    )
+    assert capsys.readouterr().out.count("billing pending") == (2 if partial else 3)
     assert all(row["held_usd"] == 0.4 for row in rows.values())
     asyncio.run(experiment.resume_experiment(tmp_path, "task"))
     assert calls == expected_calls
@@ -1689,6 +1690,9 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
         )
     row = {
         "attempt": "synthetic",
+        "planned_job": "task",
+        "slot": 1,
+        "raw_solve": 0,
         "path": str(tmp_path / "result.json"),
         "exception_type": None,
         "stop_reason": "elapsed_seconds",
@@ -1699,7 +1703,7 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
     monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
     assert len(experiment.open_slots(tmp_path, TASK)) == 1
     experiment.check_result(row)  # Flagged for review; the job continues.
-    assert "ended during API retry backoff" in capsys.readouterr().out
+    assert "waiting to retry an API request" in capsys.readouterr().out
 
 
 def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
@@ -1717,7 +1721,7 @@ def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
     monkeypatch.setattr(experiment, "no_active_jobs", lambda *args: None)
     monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
-    monkeypatch.setattr(experiment, "check_result", lambda row: None)
+    monkeypatch.setattr(experiment, "check_result", lambda row, **_: None)
     monkeypatch.setattr(experiment, "write_summary", lambda folder: None)
 
     async def replace(folder, name, slot):
