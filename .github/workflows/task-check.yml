@@ -96,15 +96,20 @@ jobs:
               paths = [path for path in changed.split("\0") if path.count("/") > 1]
               names = {path.split("/")[1] for path in paths}
           else:
+              if not requested.strip():
+                  stop("No task requested")
               names = set(requested.split())
           selected = []
           for name in sorted(names):
               folder = root / name
-              if folder.is_file() and not folder.is_symlink():
+              if base and folder.is_file() and not folder.is_symlink():
                   continue  # A plain file directly under tasks/ is not a task.
               if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
                   # The name itself is not printed; it may hold workflow commands.
                   stop("A changed or requested folder under tasks/ has an unsupported name")
+              if folder.is_file() and not folder.is_symlink():
+                  # The name passed the regex above, so it is safe to print.
+                  stop(f"tasks/{name} is a file, not a task folder")
               if not folder.exists() and not folder.is_symlink():
                   if base:
                       continue  # Deleted by this pull request.
@@ -189,6 +194,7 @@ jobs:
           fi
           uv run --no-sync python - "$RUNNER_TEMP" <<'EOF'
           import json
+          import math
           import os
           import sys
           import tomllib
@@ -200,7 +206,8 @@ jobs:
           # The rubric the check ran with, saved by the selection step.
           try:
               rubric = tomllib.loads(folder.joinpath("rubric.toml").read_text())
-          except (OSError, tomllib.TOMLDecodeError):
+          except (OSError, ValueError):
+              # Invalid TOML and bytes that are not valid UTF-8 both land here.
               rubric = {}
           entries = rubric.get("criteria")
           criteria = (
@@ -308,11 +315,16 @@ jobs:
 
 
           def cost_of(result):
-              # Only a number may reach the sum and the log.
+              # Only a finite number that can be formatted may reach the sum and
+              # the log.
               cost = result.get("cost_usd") if isinstance(result, dict) else None
               if isinstance(cost, bool) or not isinstance(cost, (int, float)):
                   return None
-              return cost
+              try:
+                  cost = float(cost)
+              except OverflowError:
+                  return None  # An integer too large to format.
+              return cost if math.isfinite(cost) else None
 
 
           for result in rows:
