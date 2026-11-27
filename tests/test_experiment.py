@@ -1564,6 +1564,15 @@ def test_resume_respects_review_decisions_and_stopping_reasons(
     )
 
 
+def stub_plan(jobs: list[dict]) -> dict:
+    """The plan fields resume reads, for tests that replace the plan."""
+    return {
+        "jobs": jobs,
+        "development": False,
+        "settings": {"models": {"agent": TEST_MODEL}},
+    }
+
+
 @pytest.mark.parametrize("partial", [False, True])
 def test_resume_continues_with_pending_billing_without_repeating_trials(
     tmp_path, monkeypatch, capsys, partial
@@ -1574,7 +1583,7 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     rows = {}
     item = {"name": "task", "challenge": "task", "attempts": 3}
     monkeypatch.setattr(experiment, "no_active_jobs", lambda *args: None)
-    monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
+    monkeypatch.setattr(experiment, "read_plan", lambda folder: stub_plan([item]))
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
 
     async def execute(folder, plan, items, *, slots=None, on_trial_result=None):
@@ -1719,7 +1728,7 @@ def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
     rows = {("task", 1): failed}
     calls = []
     monkeypatch.setattr(experiment, "no_active_jobs", lambda *args: None)
-    monkeypatch.setattr(experiment, "read_plan", lambda folder: {"jobs": [item]})
+    monkeypatch.setattr(experiment, "read_plan", lambda folder: stub_plan([item]))
     monkeypatch.setattr(experiment, "active", lambda folder: rows)
     monkeypatch.setattr(experiment, "check_result", lambda row, **_: None)
     monkeypatch.setattr(experiment, "write_summary", lambda folder: None)

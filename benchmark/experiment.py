@@ -20,6 +20,8 @@ from harbor.models.job.config import JobConfig
 from harbor.models.trial.result import TrialResult
 from harbor.utils.logger import logger as harbor_logger
 from rich import get_console
+from rich.padding import Padding
+from rich.table import Table
 from rich.text import Text
 
 from benchmark.answers import is_success, reward_weights
@@ -91,26 +93,64 @@ def shown_path(path: Path) -> str:
     )
 
 
+def show_fields(title: str | None, rows: list[tuple[str, str]]) -> None:
+    """A bold title over labelled rows, the layout of the start and end screens."""
+    table = Table.grid(padding=(0, 3))
+    # One label width keeps the values of separate groups in one column.
+    table.add_column(style="dim", min_width=9)
+    # Fold long paths and commands rather than cut them short.
+    table.add_column(overflow="fold")
+    for row in rows:
+        table.add_row(*row)
+    if title:
+        show(Text(title, "bold"))
+    show(Padding(table, (0, 0, 0, 2), expand=False))
+
+
+def plan_title(plan: dict) -> str:
+    return "Ariadne development run" if plan["development"] else "Ariadne experiment"
+
+
+def plan_fields(plan: dict) -> list[tuple[str, str]]:
+    """The model, the tasks and any variant, for the start and end screens."""
+    tasks = str(len(plan["jobs"]))
+    attempts = {item["attempts"] for item in plan["jobs"]}
+    if len(attempts) == 1:
+        tasks += f", {count(attempts.pop(), 'attempt')} each"
+    rows = [("Model", plan["settings"]["models"]["agent"]), ("Tasks", tasks)]
+    variant = plan_variant(plan["settings"])
+    if variant != "plain":
+        rows.append(("Variant", variant))
+    return rows
+
+
+# Column headings over the attempt lines, aligned with attempt_line.
+ATTEMPT_COLUMNS = (
+    f"  {'Task':<12}{'Attempt':<9}{'Result':<12}{'Time':>7}  {'Run left':>8}  Notes"
+)
+
+
 def attempt_line(row: dict, remaining: float | None = None) -> Text:
     """One line for a finished attempt: its task, outcome, time and any follow-up."""
     interrupted = bool(row["exception_type"]) or row["stop_reason"] not in ORDINARY
     retry = not interrupted and retry_interruption(row)
     if interrupted or retry:
-        mark, outcome = Text("!", "bold yellow"), "interrupted"
+        outcome, style = "interrupted", "bold yellow"
     elif row["raw_solve"]:
-        mark, outcome = Text("✓", "bold green"), "solved"
+        outcome, style = "solved", "bold green"
     else:
-        mark, outcome = Text("✗", "bold red"), "not solved"
+        outcome, style = "unsolved", "bold red"
     elapsed = row.get("elapsed_seconds")
     line = Text.assemble(
-        "  ",
-        mark,
-        f" {row['planned_job']:<10} #{row['slot']}  {outcome:<11} ",
+        f"  {row['planned_job']:<12}{row['slot']:<9}",
+        (f"{outcome:<12}", style),
         (duration(elapsed) if elapsed is not None else "?").rjust(7),
+        # The whole run's estimated time left, before the notes, whose length varies.
+        ((duration(remaining) if remaining else "").rjust(10), "dim"),
     )
     notes = []
     reward = (row.get("components") or {}).get("reward") or 0
-    if outcome == "not solved" and reward:
+    if outcome == "unsolved" and reward:
         notes.append(f"partial credit {reward:g}")
     if interrupted:
         notes.append(
@@ -118,20 +158,20 @@ def attempt_line(row: dict, remaining: float | None = None) -> Text:
         )
     elif retry:
         notes.append("time ran out waiting to retry an API request")
-    elif outcome == "not solved" and not (reward and row["stop_reason"] == "submitted"):
+    elif outcome == "unsolved" and not (reward and row["stop_reason"] == "submitted"):
         # A display label never stops the job, so an unknown ending shows as is.
         notes.append(ENDINGS.get(row["stop_reason"], row["stop_reason"]))
     if row["cost_usd"] is None or row["held_usd"] != 0:
         notes.append("billing pending")
-    if notes:
-        line.append("  " + " · ".join(notes))
     if interrupted or retry:
-        line.append(f" · review {row['attempt']}", "yellow")
-    if remaining is not None:
-        # Right-aligned when the line fits, so the estimates form a column.
-        estimate = f"about {duration(remaining)} left"
-        gap = min(get_console().width, 100) - line.cell_len - len(estimate)
-        line.append(" " * max(gap, 3) + estimate, "dim")
+        notes.append(Text(f"review {row['attempt']}", "yellow"))
+    if notes:
+        line.append("  ")
+        line.append(
+            Text(", ").join(
+                Text(note) if isinstance(note, str) else note for note in notes
+            )
+        )
     return line
 
 
@@ -581,13 +621,21 @@ def no_active_jobs(experiments: Path) -> None:
 async def resume_experiment(folder: Path, task=None) -> None:
     """Recover a stopped experiment: for each task, replace reviewed failures,
     then run the slots that never ran."""
-    for item in read_plan(folder)["jobs"]:
+    plan = read_plan(folder)
+    started = False
+    for item in plan["jobs"]:
         if task is not None and item["challenge"] != task:
             continue
         slots = open_slots(folder, item)
         if not slots:
             continue
         no_active_jobs(folder.parent)
+        if not started:
+            fields = [*plan_fields(plan), ("Folder", shown_path(folder))]
+            show_fields(f"Resuming {plan_title(plan)}", fields)
+            show()
+            show(ATTEMPT_COLUMNS, style="dim")
+            started = True
         for slot, previous in slots:
             if previous is None:
                 continue
@@ -597,13 +645,17 @@ async def resume_experiment(folder: Path, task=None) -> None:
                     "An interrupted trial needs failure attribution before replacement"
                 )
             reason = decision["disposition"].replace("_", " ")
-            show(f"Replacing {item['name']} #{slot}, reviewed as {reason}")
+            show(
+                f"  Replacing {item['name']} attempt {slot}, reviewed as {reason}",
+                style="dim",
+            )
             await replace_attempt(folder, item["name"], slot)
             check_result(active(folder).get((item["name"], slot)))
         never_ran = [slot for slot, previous in slots if previous is None]
         if never_ran:
-            numbers = ", ".join(f"#{slot}" for slot in never_ran)
-            show(f"Running {item['name']} {numbers}")
+            numbers = ", ".join(str(slot) for slot in never_ran)
+            noun = "attempt" if len(never_ran) == 1 else "attempts"
+            show(f"  Running {item['name']} {noun} {numbers}", style="dim")
             try:
                 await execute_job(
                     folder,
@@ -616,6 +668,16 @@ async def resume_experiment(folder: Path, task=None) -> None:
                 write_summary(folder)
 
 
+def experiment_folder(jobs_dir: Path) -> Path:
+    """A new experiment's folder, named before anything is created."""
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S")
+    return (
+        jobs_dir.resolve().parent
+        / "logs/experiments"
+        / f"experiment-{stamp}-{uuid4().hex[:8]}"
+    )
+
+
 async def run_experiment(
     packages: list[Package],
     jobs_dir: Path,
@@ -623,27 +685,17 @@ async def run_experiment(
     settings=None,
     seed=None,
     dev=False,
+    folder: Path | None = None,
 ) -> Path:
     settings = copy.deepcopy(settings or load_draft())
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S")
-    folder = (
-        jobs_dir.resolve().parent
-        / "logs/experiments"
-        / f"experiment-{stamp}-{uuid4().hex[:8]}"
-    )
+    folder = folder or experiment_folder(jobs_dir)
     folder.parent.mkdir(parents=True, exist_ok=True)
     plan = create_plan(
         packages, folder, settings=settings, jobs_dir=jobs_dir, dev=dev, seed=seed
     )
-    attempts = sum(item["attempts"] for item in plan["jobs"])
-    show(
-        Text.assemble(
-            ("Ariadne", "bold"),
-            f" · {settings['models']['agent']} · {count(len(plan['jobs']), 'task')}, "
-            f"{count(attempts, 'attempt')}" + (" · development" if dev else ""),
-        )
-    )
-    show(f"Experiment {shown_path(folder)}\n", style="dim")
+    show_fields(plan_title(plan), [*plan_fields(plan), ("Folder", shown_path(folder))])
+    show()
+    show(ATTEMPT_COLUMNS, style="dim")
     try:
         await execute_job(folder, plan, plan["jobs"], on_trial_result=check_result)
     finally:
