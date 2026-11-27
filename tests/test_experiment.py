@@ -1621,7 +1621,7 @@ def test_resume_continues_with_pending_billing_without_repeating_trials(
     # One native job for the open slots: the rest after a partial run, or all three.
     expected_calls = [[2, 3]] if partial else [[1, 2, 3]]
     assert calls == expected_calls
-    assert capsys.readouterr().out.count("billing pending") == (2 if partial else 3)
+    assert capsys.readouterr().out.count("bill pending") == (2 if partial else 3)
     assert all(row["held_usd"] == 0.4 for row in rows.values())
     asyncio.run(experiment.resume_experiment(tmp_path, "task"))
     assert calls == expected_calls
@@ -1712,7 +1712,7 @@ def test_resume_flags_retry_interruption_even_after_rejection_holds_are_removed(
     monkeypatch.setattr(experiment, "active", lambda folder: {("task", 1): row})
     assert len(experiment.open_slots(tmp_path, TASK)) == 1
     experiment.check_result(row)  # Flagged for review; the job continues.
-    assert "waiting to retry an API request" in capsys.readouterr().out
+    assert "API retry timeout" in capsys.readouterr().out
 
 
 def test_resume_replaces_reviewed_failures_then_runs_open_slots_together(
