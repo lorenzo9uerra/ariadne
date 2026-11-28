@@ -3,8 +3,9 @@ name: Task check
 # An agent reads each task a pull request adds or changes and grades it against
 # benchmark/task_rubric.toml with `harbor check`; on pull requests the base
 # branch's rubric is used, so a change cannot weaken its own grading. The grades
-# come from a model and vary between runs, so each task is checked three times
-# (`-k 3`) and a criterion's verdict is the outcome at least two runs agree on;
+# come from a model and vary between runs, so on pull requests each task is
+# checked three times (`-k 3`) and a criterion's verdict is the outcome at
+# least two runs agree on (a manual run defaults to one cheaper run);
 # keep this job out of the required checks. Every tasks/*/private/ folder is
 # tracked in this public repository, so the grader's explanations disclose
 # nothing new: they are published under the canary line pinned in this
@@ -23,6 +24,11 @@ on:
       tasks:
         description: "Task folders to check, separated by spaces"
         required: true
+      attempts:
+        description: "Grader runs per task: 1 for a quick check, 3 for a majority vote"
+        type: choice
+        options: ["1", "3"]
+        default: "1"
 
 permissions:
   contents: read
@@ -159,6 +165,12 @@ jobs:
           for name in selected:
               shutil.copytree(root / name, temp / "review" / name, symlinks=True)
           (temp / "tasks.txt").write_text("".join(f"{name}\n" for name in selected))
+          # Pull requests always get the three-run vote; a manual run may ask
+          # for a single, cheaper run.
+          attempts = (event.get("inputs") or {}).get("attempts", "1") if requested else "3"
+          if attempts not in ("1", "3"):
+              stop("attempts must be 1 or 3")
+          (temp / "attempts").write_text(attempts)
           print("Tasks:", " ".join(selected))
           EOF
       - name: Install uv
@@ -193,11 +205,21 @@ jobs:
           # The check stops at 90 minutes, and is killed a minute later if it
           # hangs, so the report step still runs within the job's limit and
           # names the timeout (status 124, or 137 once killed).
+          # Pull requests always get three runs, whatever the file says: the
+          # dependency install ran on the pull request's code.
+          attempts=3
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            attempts=$(cat "$RUNNER_TEMP/attempts")
+          fi
+          case "$attempts" in
+            1|3) ;;
+            *) echo "::error::attempts must be 1 or 3"; exit 1 ;;
+          esac
           status=0
           timeout --kill-after=1m 90m uv run --no-sync harbor check "$RUNNER_TEMP/review" \
             -r "$RUNNER_TEMP/rubric.toml" \
             -a terminus-2 -m openrouter/deepseek/deepseek-v4.1-flash \
-            -k 3 -n 8 \
+            -k "$attempts" -n 8 \
             -o "$RUNNER_TEMP/task-check" --job-name check --quiet \
             > "$RUNNER_TEMP/check.log" 2>&1 || status=$?
           echo "$status" > "$RUNNER_TEMP/status"
@@ -220,6 +242,14 @@ jobs:
 
           folder = Path(sys.argv[1])
           expected = folder.joinpath("tasks.txt").read_text().split()
+          # One run decides alone; with three, two must agree.
+          attempts_file = folder.joinpath("attempts")
+          single = (
+              os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+              and attempts_file.is_file()
+              and attempts_file.read_text() == "1"
+          )
+          needed = 1 if single else 2
           job = folder / "task-check/check"
           # The rubric the check ran with, saved by the selection step.
           try:
@@ -425,6 +455,10 @@ jobs:
                   emit("The check did not finish; run it locally.\n")
                   failed = True
                   continue
+              if single and len(attempts) != 1:
+                  emit("The report holds more than the one requested run.\n")
+                  failed = True
+                  continue
               finished = []
               for attempt in attempts:
                   if attempt.get("error"):
@@ -459,10 +493,10 @@ jobs:
                   winners = [
                       outcome for outcome, count in counts.items() if count == best
                   ]
-                  # A verdict needs at least two runs to agree on one outcome;
-                  # otherwise, or with fewer than two finished runs, there is
-                  # no majority, which fails the job.
-                  if best >= 2 and len(winners) == 1:
+                  # With three runs a verdict needs two to agree on one
+                  # outcome; otherwise, or with fewer than two finished runs,
+                  # there is no majority, which fails the job.
+                  if best >= needed and len(winners) == 1:
                       outcome = winners[0]
                       label = f"{verdicts[outcome]} ({best} of {len(finished)})"
                       failed |= outcome == "fail"
