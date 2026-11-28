@@ -38,10 +38,14 @@ defaults:
 
 jobs:
   check:
-    # Pull requests from forks get no secrets, so they are not checked.
+    # Pull requests from forks get no secrets, so they are not checked. A
+    # pull request labeled skip-task-check skips the paid check, for minimal
+    # task edits. To check it later, remove the label and push a commit, since
+    # a re-run reuses the original event and its labels.
     if: >-
       github.event_name == 'workflow_dispatch'
-      || github.event.pull_request.head.repo.full_name == github.repository
+      || (github.event.pull_request.head.repo.full_name == github.repository
+          && !contains(github.event.pull_request.labels.*.name, 'skip-task-check'))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
